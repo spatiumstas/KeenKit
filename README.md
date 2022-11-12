@@ -1,4 +1,4 @@
-# Keenetic-Sedy-AutoUpdate
+# Keenetic-Sedy-AutoUpdate-Firmware
 Скрипт для автоматического обновления прошивок Keenetic портированных @Sedy_Sergey
 
 Инструкция:
