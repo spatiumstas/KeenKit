@@ -1,2 +1,8 @@
 # Keenetic-Sedy-AutoUpdate
-Keenetic AutoUpdate.sh Sedy
+Скрипт для автоматического обновления прошивок Keenetic портированных @Sedy_Sergey
+
+Инструкция:
+1. Закинуть файл в корень
+2. Дать права на выполнение "chmod +x /opt/update.sh"
+3. Закинуть прошивку Sedy в корень
+4. Выполнить скрипт через "/opt/keen.sh"
