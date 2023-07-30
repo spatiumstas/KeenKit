@@ -1,11 +1,34 @@
 #! /bin/sh
 
-if test $(find /opt -name '*Sedy*'); then
-   Firmware=$(find /opt -name '*Sedy*')
+if test $(find /opt -name '*_Sedy*'); then
+   Firmware=$(find /opt -name '*_Sedy*')
    FirmwareName=$(basename -- "$Firmware")
    md5=$(md5sum $Firmware)
     echo "Прошивка $FirmwareName найдена."
     echo "Контрольная сумма - $md5"
+REBOOTCONFIRM(){
+    echo "" 
+    echo -n "Контрольная сумма совпадает? (y/n) " 
+ 
+    read item_rc 
+    case "$item_rc" in 
+    y|Y) echo ""
+    echo "Обновление роутера...."
+    echo ""
+        ;; 
+    n|N) echo ""
+    echo "Удаляю файл обновления"
+    echo "Скопируйте ещё раз файл обновления на встроенное хранилище"
+    echo ""
+    rm $Firmware 
+        exit 0 
+        ;; 
+    *) echo "Вы ничего не ввели..." 
+REBOOTCONFIRM 
+        ;; 
+esac 
+} 
+REBOOTCONFIRM
     echo "Проверяю раздел Firmware_1"
 
 if  grep -w '/proc/mtd' -e 'Firmware_1' | grep mtd3; then
@@ -22,11 +45,13 @@ fi
     echo "Oбновление Firmware_2"
     dd if=$Firmware of=/dev/mtdblock13
     wait
+    echo "Удаляю файл обновления"
     rm $Firmware
     wait
-    echo "Прошивка удалена"
-    echo "Перезагрузка роутера"
+    echo ""
+    echo "Перезагрузка роутера..."
     reboot
 else
-   echo "Прошивка не найдена в /opt"
+   echo "Файл обновления не найдена в /opt"
+   echo "Скопируйте файл обновления на встроенное хранилище роутера."
 fi
