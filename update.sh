@@ -1,7 +1,7 @@
 #! /bin/sh
 
-if test $(find /opt -name '*_Sedy*'); then
-   Firmware=$(find /opt -name '*_Sedy*')
+if test $(find /opt -name '*update*'); then
+   Firmware=$(find /opt -name '*update*')
    FirmwareName=$(basename -- "$Firmware")
    md5=$(md5sum $Firmware)
     echo "Прошивка $FirmwareName найдена."
@@ -52,6 +52,6 @@ fi
     echo "Перезагрузка роутера..."
     reboot
 else
-   echo "Файл обновления не найдена в /opt"
+   echo "Файл обновления не найден в /opt"
    echo "Скопируйте файл обновления на встроенное хранилище роутера."
 fi
