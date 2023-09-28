@@ -18,6 +18,7 @@ fi
 
 Firmware=$(echo "$files" | awk "NR==$choice")
 FirmwareName=$(basename "$Firmware")
+    echo ""
     echo "Выбран - $FirmwareName"
 
 md5=$(md5sum "$Firmware")
