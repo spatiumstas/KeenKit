@@ -46,23 +46,25 @@ case "$item_rc" in
 REBOOTCONFIRM
 
     echo ""
-if grep -w '/proc/mtd' -e 'Firmware_1' | grep mtd3; then
+    mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
+    echo "$mtdSlot"
     echo ""
-    echo "Firmware_1 на mtd3 разделе"
     echo ""
-    echo "Oбновление Firmware_1"
-    dd if=$Firmware of=/dev/mtdblock3
+    result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+    echo "Firmware_1 на mtd$result разделе, обновляю..."
+    dd if=$Firmware of=/dev/mtdblock$result
     wait
-else
-    echo "Firmware_1 на mtd5 разделе"
-    echo "Oбновление Firmware_1"
-    dd if=$Firmware of=/dev/mtdblock5
-    wait
-fi
     echo ""
-    echo "Oбновление Firmware_2"
-    dd if=$Firmware of=/dev/mtdblock13
+    echo ""
+    mtdSlot2="$(grep -w '/proc/mtd' -e 'Firmware_2')"
+    echo "$mtdSlot2"
+    echo ""
+    echo ""
+    result2=$(echo "$mtdSlot2" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+    echo "Firmware_2 на mtd$result2 разделе, обновляю..."
+    dd if=$Firmware of=/dev/mtdblock$result2
     wait
+    echo ""
     echo ""
     read -p "Удалить файл обновления? (y/n) " item_rc1
     case "$item_rc1" in
