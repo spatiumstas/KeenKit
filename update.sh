@@ -20,31 +20,6 @@ Firmware=$(echo "$files" | awk "NR==$choice")
 FirmwareName=$(basename "$Firmware")
     echo ""
     echo "Выбран - $FirmwareName"
-
-md5=$(md5sum "$Firmware")
-    echo "Контрольная сумма - $md5"
-
-REBOOTCONFIRM(){
-    echo ""
-    read -p "Контрольная сумма совпадает? (y/n) " item_rc
-case "$item_rc" in
-    y|Y) echo ""
-    ;;
-    n|N) echo ""
-    echo "Удаляю файл обновления"
-    echo "Скопируйте ещё раз файл обновления на встроенное хранилище"
-    echo ""
-    rm $Firmware
-    exit 0
-    ;;
-*) echo "Вы ничего не ввели..."
-    REBOOTCONFIRM
-    ;;
-    esac
-}
-
-REBOOTCONFIRM
-
     echo ""
     mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
     echo "$mtdSlot"
