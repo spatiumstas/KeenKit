@@ -5,18 +5,16 @@ printf "\033c"
 echo "KeenKit v1.1 by spatiumstas"
 echo ""
 echo "1. Обновить прошивку"
-echo "2. Бекап раздела"
-echo "3. Бекап всех разделов"
-echo "4. Бекап Entware"
+echo "2. Бекап разделов"
+echo "3. Бекап Entware"
 echo "0. Выход"
 echo ""
-read -p "Выберите действие (от 0 до 4): " choice
+read -p "Выберите действие (от 0 до 3): " choice
 
 case "$choice" in
 1) firmware_update ;;
 2) backup_blocks ;;
-3) backup_all ;;
-4) backup_entware ;;
+3) backup_entware ;;
 0) exit ;;
 *) echo "Неверный выбор. Попробуйте снова." ; sleep 2 ; main_menu ;;
 esac
@@ -90,29 +88,6 @@ sleep 3
 main_menu
 }
 
-backup_all() {
-output=$(mount)
-filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
-echo ""
-echo ""
-echo "Доступные накопители:"
-echo "$filtered_output" | awk '{print NR, $0}'
-echo ""
-read -p "Выберите накопитель: " choice
-
-selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
-mkdir -p /$selected_drive/mtd_backup
-echo "Выполняю бекап..."
-for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
-do
-cat /dev/mtdblock$i > /$selected_drive/mtd_backup/mtd$i.bin
-done
-echo "Бекап успешно выполнен"
-
-sleep 3
-main_menu
-}
-
 backup_entware(){
 output=$(mount)
 filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
@@ -141,20 +116,8 @@ main_menu
 }
 
 backup_blocks() {
-output=$(cat /proc/mtd)
-echo ""
-echo ""
-echo "$output" | awk 'NR>1 {print NR, $0}'
-echo ""
-read -p "Выберите раздел: " choice
-
-selected_mtd=$(echo "$output" | sed -n "${choice}p")
-echo "Выбран $selected_mtd"
-selected_mtd_cut=$(echo "$selected_mtd" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-
 output=$(mount)
 filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
-echo ""
 echo ""
 echo "Доступные накопители:"
 echo "0. Встроенное хранилище (может не хватить места)"
@@ -168,14 +131,35 @@ else
 selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
 fi
 
+output=$(cat /proc/mtd)
+echo ""
+echo ""
+echo "1 Бекап всех разделов"
+echo "$output" | awk 'NR>1 {print NR, $0}'
+echo ""
+mkdir -p /$selected_drive/mtd_backup
+read -p "Выберите раздел: " choice
+if [ "$choice" -eq 1 ]; then 
+for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
+do
+echo "Копирую mtd$i.bin..."   
+cat /dev/mtdblock$i > /$selected_drive/mtd_backup/mtd$i.bin
+done
+echo ""
+echo "Бекап успешно выполнен"
+else
+selected_mtd=$(echo "$output" | sed -n "${choice}p")
+echo "Выбран $selected_mtd"
+selected_mtd_cut=$(echo "$selected_mtd" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+
 echo "Бекап mtd$selected_mtd_cut в $selected_drive"
 echo ""
-dd if=/dev/mtd$selected_mtd_cut of=/$selected_drive/mtd$selected_mtd_cut.bin
+dd if=/dev/mtd$selected_mtd_cut of=/$selected_drive/mtd_backup/mtd$selected_mtd_cut.bin
 wait
 echo ""
 echo ""
 echo "Бекап успешно выполнен"
-
+fi
 sleep 3
 main_menu
 }
