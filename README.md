@@ -1,8 +1,8 @@
-# Keenetic clone firmware update
+# KeenKit
 
 1. Закинуть файл в корень
-2. Дать права на выполнение "chmod +x /opt/update.sh"
+2. Дать права на выполнение "chmod +x /opt/keenkit.sh"
 3. Закинуть прошивку с расширением .bin в корень
-4. Выполнить скрипт через "/opt/update.sh"
+4. Выполнить скрипт через "/opt/keenkit.sh"
 
-![Screenshot_3](https://github.com/spatiumstas/Keenetic-update/assets/79056064/d2f782b5-8e25-4815-8cc4-d96a02706130)
+![Screenshot_2](https://github.com/spatiumstas/KeenKit/assets/79056064/2b60ad71-a19e-4823-b382-8f010a1431fa)
