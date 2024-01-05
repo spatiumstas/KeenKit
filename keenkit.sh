@@ -27,9 +27,12 @@ firmware_update() {
 files=$(find /opt -name '*.bin')
 count=$(echo "$files" | wc -l)
 
-if [ $count -eq 0 ]; then
-echo "Прошивка не найдена, скопируйте файл обновления в корень встроенного хранилище роутера"
-sleep 7
+if [ -z "$files" ]; then
+echo ""    
+echo "Прошивка(bin) не найдена, скопируйте файл на встроенного хранилище роутера"
+echo ""  
+echo "Возврат в главное меню через 5 секунд..."
+sleep 5
 main_menu
 fi
 echo ""
@@ -94,10 +97,11 @@ echo ""
 echo "Доступные накопители:"
 echo "0. Встроенное хранилище (может не хватить места)"
 if [ -n "$filtered_output" ]; then
-echo "$filtered_output" | awk '{print NR".", $0}'
+echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
 fi
 echo ""
 read -p "Выберите накопитель: " choice
+
 if [ "$choice" -eq 0 ]; then
 selected_drive="/opt"
 else
@@ -109,6 +113,7 @@ echo ""
 echo ""
 echo "1. Бекап всех разделов"
 echo "$output" | awk 'NR>1 {print NR".", $0}'
+sleep 2
 echo ""
 folder_path=$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)
 mkdir -p $folder_path
@@ -117,8 +122,9 @@ if [ "$choice" -eq 1 ]; then
 output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
 for i in $(seq 0 $(($output_all_mtd-1)))
 do
-    echo "Копирую mtd$i.bin..."   
-    cat /dev/mtdblock$i > $folder_path/mtd$i.bin
+    mtd_name=$(echo "$output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+    echo "Копирую mtd$i.$mtd_name.bin..."   
+    cat /dev/mtdblock$i > $folder_path/mtd$i.$mtd_name.bin
 done
 
 else
@@ -133,7 +139,7 @@ wait
 fi
 echo ""
 sleep 2
-echo "Бекап $selected_mtd_name успешно выполнен в $folder_path"
+echo "Бекап успешно выполнен в $folder_path"
 echo ""
 sleep 2
 echo "Возврат в главное меню через 5 секунд..."
@@ -170,12 +176,13 @@ main_menu
 }
 
 rewrite_block(){
-  files=$(find /opt -name '*.bin')
-  count=$(echo "$files" | wc -l)  
-
-  if [ $count -eq 0 ]; then
+files=$(find /opt -name '*.bin')
+count=$(echo "$files" | wc -l)  
+echo ""
+if [ -z "$files" ]; then
 echo "Bin файл не найден на встроенном хранилище"
-sleep 7
+echo "Возврат в главное меню через 5 секунд..."
+sleep 5
 main_menu
 fi
 echo ""
@@ -186,21 +193,19 @@ read -p "Выберете файл для замены (от 1 до $count): " c
 
 if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
 echo "Неверный выбор файла"
-sleep 7
+sleep 3
 main_menu
 fi
 
 mtdFile=$(echo "$files" | awk "NR==$choice")
-echo "$mtdFile"
-
 mtdName=$(basename "$mtdFile")
-echo "$mtdName"
 echo ""
 echo ""
 output=$(cat /proc/mtd)
 echo "$output" | awk '{print NR".", $0}'
 echo ""
 echo "Выбран - $mtdName"
+echo "Внимание, загрузчик не перезапишется"
 read -p "Выберите какой раздел перезаписать выбранным файлом: " choice 
 
 selected_mtd=$(echo "$output" | sed -n "${choice}p")
