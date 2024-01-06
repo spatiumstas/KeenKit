@@ -116,8 +116,8 @@ echo "$output" | awk 'NR>1 {print NR".", $0}'
 sleep 2
 echo ""
 folder_path=$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)
-mkdir -p $folder_path
 read -p "Выберите раздел: " choice 
+mkdir -p $folder_path
 if [ "$choice" -eq 1 ]; then
 output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
 for i in $(seq 0 $(($output_all_mtd-1)))
