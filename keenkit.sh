@@ -2,7 +2,7 @@
 
 main_menu() {
 printf "\033c"
-echo "KeenKit v1.3 by spatiumstas"
+echo "KeenKit v1.4 by spatiumstas"
 echo ""
 echo "1. Обновить прошивку"
 echo "2. Бекап разделов"
@@ -24,22 +24,42 @@ esac
 }
 
 firmware_update() {
-files=$(find /opt -name '*.bin')
+output=$(mount)
+filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
+echo ""
+echo "Доступные накопители:"
+echo "0. Встроенное хранилище"
+if [ -n "$filtered_output" ]; then
+echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
+fi
+echo ""
+read -p "Выберите накопитель с размещённым файлом обновления (.bin): " choice
+
+if [ "$choice" -eq 0 ]; then
+selected_drive="/opt"
+else
+selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
+fi
+
+files=$(find $selected_drive -name '*.bin')
 count=$(echo "$files" | wc -l)
 
 if [ -z "$files" ]; then
 echo ""    
-echo "Прошивка(bin) не найдена, скопируйте файл на встроенного хранилище роутера"
+echo "Прошивка формата .bin не найдена, скопируйте файл на встроенного хранилище роутера"
 echo ""  
-echo "Возврат в главное меню через 5 секунд..."
-sleep 5
+echo "Возврат в главное меню через 7 секунд..."
+sleep 7
 main_menu
 fi
 echo ""
 echo "$files" | awk '{print NR".", substr($0, 6)}'
+echo "00 - Выход в главное меню"
 echo ""
-read -p "Выберете файл обновления (от 1 до $count): " choice
-
+read -p "Выберите файл обновления (от 1 до $count): " choice
+if [ "$choice" -eq 00 ]; then
+    main_menu
+fi
 if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
 echo "Неверный выбор файла"
 sleep 2
@@ -48,10 +68,11 @@ fi
 
 Firmware=$(echo "$files" | awk "NR==$choice")
 FirmwareName=$(basename "$Firmware")
-    echo ""
-    echo "Выбран - $FirmwareName"
-    echo ""
-    mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
+echo ""
+read -p "Выбран - $FirmwareName для обновления, всё верно? (y/n) " item_rc1
+case "$item_rc1" in
+y|Y) echo ""
+mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
     echo "$mtdSlot"
     result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
     echo "Firmware_1 на mtd$result разделе, обновляю..."
@@ -65,8 +86,8 @@ FirmwareName=$(basename "$Firmware")
     dd if=$Firmware of=/dev/mtdblock$result2
     wait
     echo ""
-    read -p "Удалить файл обновления? (y/n) " item_rc1
-    case "$item_rc1" in
+    read -p "Удалить файл обновления? (y/n) " item_rc2
+    case "$item_rc2" in
 y|Y)
 rm $Firmware
 wait
@@ -76,8 +97,8 @@ n|N) echo ""
 *)
 esac
 
-    read -p "Перезагрузить роутер? (y/n) " item_rc2
-case "$item_rc2" in
+    read -p "Перезагрузить роутер? (y/n) " item_rc3
+case "$item_rc3" in
 y|Y) echo ""
 reboot
 ;;
@@ -88,6 +109,11 @@ esac
 echo "Возврат в главное меню через 2 секунды..."
 sleep 2
 main_menu
+;;
+n|N) main_menu
+;;
+*)
+esac
 }
 
 backup_block() {
@@ -111,14 +137,17 @@ fi
 output=$(cat /proc/mtd)
 echo ""
 echo ""
-echo "1. Бекап всех разделов"
-echo "$output" | awk 'NR>1 {print NR".", $0}'
-sleep 2
+echo "$output" | awk 'NR>1 {print $0}'
+echo "00 - Выход в главное меню"
+echo "99 - Бекап всех разделов"
 echo ""
 folder_path=$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)
-read -p "Выберите раздел: " choice 
+read -p "Выберите цифру раздела (например для mtd2 это 2): " choice 
+if [ "$choice" -eq 00 ]; then
+    main_menu
+fi
 mkdir -p $folder_path
-if [ "$choice" -eq 1 ]; then
+if [ "$choice" -eq 99 ]; then
 output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
 for i in $(seq 0 $(($output_all_mtd-1)))
 do
@@ -128,17 +157,13 @@ do
 done
 
 else
-selected_mtd=$(echo "$output" | sed -n "${choice}p")
-echo "Выбран $selected_mtd"
-sleep 2
-selected_mtd_cut=$(echo "$selected_mtd" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-selected_mtd_name=$(echo "$selected_mtd" | grep -oP '(?<=\").*(?=\")')
+selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+echo "Выбран mtd$choice.$selected_mtd.bin, копирую..."
 echo ""
-dd if=/dev/mtd$selected_mtd_cut of=$folder_path/mtd$selected_mtd_cut.$selected_mtd_name.bin
+dd if=/dev/mtd$choice of=$folder_path/mtd$choice.$selected_mtd.bin
 wait
 fi
 echo ""
-sleep 2
 echo "Бекап успешно выполнен в $folder_path"
 echo ""
 sleep 2
@@ -176,21 +201,39 @@ main_menu
 }
 
 rewrite_block(){
-files=$(find /opt -name '*.bin')
-count=$(echo "$files" | wc -l)  
+output=$(mount)
+filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
 echo ""
+echo "Доступные накопители:"
+echo "0. Встроенное хранилище"
+if [ -n "$filtered_output" ]; then
+echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
+fi
+echo ""
+read -p "Выберите накопитель с размещённым файлом (.bin): " choice
+
+if [ "$choice" -eq 0 ]; then
+selected_drive="/opt"
+else
+selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
+fi
+files=$(find $selected_drive -name '*.bin')
+count=$(echo "$files" | wc -l)
 if [ -z "$files" ]; then
-echo "Bin файл не найден на встроенном хранилище"
+echo ""    
+echo "Bin файл не найден в выбранном хранилище"
 echo "Возврат в главное меню через 5 секунд..."
 sleep 5
 main_menu
 fi
-echo ""
 echo "Доступные файлы:"
 echo "$files" | awk '{print NR".", substr($0, 6)}'
 echo ""
-read -p "Выберете файл для замены (от 1 до $count): " choice
-
+echo "00 - Выход в главное меню"
+read -p "Выберите файл для замены (от 1 до $count): " choice
+if [ "$choice" -eq 00 ]; then
+    main_menu
+fi
 if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
 echo "Неверный выбор файла"
 sleep 3
@@ -202,25 +245,31 @@ mtdName=$(basename "$mtdFile")
 echo ""
 echo ""
 output=$(cat /proc/mtd)
-echo "$output" | awk '{print NR".", $0}'
+echo "$output" | awk 'NR>1 {print $0}'
+echo "00 - Выход в главное меню"
 echo ""
 echo "Выбран - $mtdName"
-echo "Внимание, загрузчик не перезапишется"
-read -p "Выберите какой раздел перезаписать выбранным файлом: " choice 
-
-selected_mtd=$(echo "$output" | sed -n "${choice}p")
-result=$(echo "$selected_mtd" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-echo "Выбран $selected_mtd для замены"
+echo "Внимание! Загрузчик не перезаписывается!"
+read -p "Выберите, какой раздел перезаписать выбранным файлом (например для mtd2 это 2): " choice 
+if [ "$choice" -eq 00 ]; then
+    main_menu
+fi
+selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+echo ""
+echo "Выбран mtd$choice.$selected_mtd для замены"
+read -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
+    case "$item_rc1" in
+y|Y)
 sleep 2
 echo ""
-dd if=$mtdFile of=/dev/mtdblock$result
+dd if=$mtdFile of=/dev/mtdblock$choice
 wait
 sleep 2
 echo ""
 echo "Раздел успешно перезаписан"
 echo ""
-read -p "Перезагрузить роутер? (y/n) " item_rc1
-case "$item_rc1" in
+read -p "Перезагрузить роутер? (y/n) " item_rc2
+case "$item_rc2" in
 y|Y) echo ""
 reboot
 ;;
@@ -231,6 +280,11 @@ esac
 echo "Возврат в главное меню через 3 секунды..."
 sleep 3
 main_menu
+;;
+n|N) main_menu
+;;
+*)
+esac
 }
 
 main_menu
