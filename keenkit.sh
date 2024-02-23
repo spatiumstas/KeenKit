@@ -32,6 +32,12 @@ script_update(){
     REPO="KeenKit"
     SCRIPT="keenkit.sh"
     TMP_DIR="/tmp"
+
+    if ! opkg list-installed | grep -q "^curl"; then
+        echo "Пакет curl не найден, устанавливаем..."
+        opkg install curl
+    fi
+
     curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/keenkit.sh" --output $TMP_DIR/$SCRIPT
 
     if [ -f "$TMP_DIR/$SCRIPT" ]; then
@@ -49,6 +55,11 @@ script_update(){
 ota_update(){
 USER="spatiumstas"
 REPO="osvault"
+
+    if ! opkg list-installed | grep -q "^curl"; then
+        echo "Пакет curl не найден, устанавливаем..."
+        opkg install curl
+    fi
 
 DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
 
@@ -343,9 +354,9 @@ tar cvzf "$selected_drive/mipsel_backup.tar.gz" -C /opt .
 wait
 echo ""
 printf "\033[1;32m"
-echo ------------------------------------------------------------------------
+echo ----------------------------------------------------------------
 echo               "Бекап успешно выполнен"
-echo ------------------------------------------------------------------------
+echo ----------------------------------------------------------------
 echo ""
 sleep 2
 printf "\033[0m"
@@ -424,9 +435,9 @@ wait
 sleep 2
 echo ""
 printf "\033[1;32m"
-echo ------------------------------------------------------------------------
+echo ------------------------------------------------------------------
 echo               "Раздел успешно перезаписан"
-echo ------------------------------------------------------------------------
+echo ------------------------------------------------------------------
 echo ""
 sleep 2
 printf "\033[0m"
