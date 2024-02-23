@@ -4,5 +4,6 @@
 2. Дать права на выполнение "chmod +x /opt/keenkit.sh"
 3. Запустить скрипт через "/opt/keenkit.sh"
 
-![Screenshot_2](https://github.com/spatiumstas/KeenKit/assets/79056064/c40dbf12-1e42-402e-9bfa-dac599da260b)
+![Screenshot_3](https://github.com/spatiumstas/KeenKit/assets/79056064/a6250570-c5ac-489f-b632-c45acf5beda3)
+
 
