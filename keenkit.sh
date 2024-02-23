@@ -33,6 +33,7 @@ script_update(){
     SCRIPT="keenkit.sh"
     TMP_DIR="/tmp"
     curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/keenkit.sh" --output $TMP_DIR/$SCRIPT
+    curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/keenkit.sh" --output /opt/keenkit.sh && chmod +x /opt/keenkit.sh
 
     if [ -f "$TMP_DIR/$SCRIPT" ]; then
         mv "$TMP_DIR/$SCRIPT" "/opt/$SCRIPT"
@@ -42,6 +43,8 @@ script_update(){
     else
         printf "\033[1;31mОшибка при скачивании скрипта.\033[0m\n"
     fi
+    sleep 2
+    /opt/$SCRIPT
 }
 
 ota_update(){
