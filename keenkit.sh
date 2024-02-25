@@ -2,7 +2,7 @@
 
 main_menu() {
 printf "\033c"
-printf "\033[1;36mKeenKit v1.5 by spatiumstas\033[0m\n"
+printf "\033[1;36mKeenKit v1.5.1 by spatiumstas\033[0m\n"
 echo ""
 echo "1. Обновить прошивку"
 echo "2. Бекап разделов"
@@ -171,7 +171,7 @@ fi
 echo ""
 read -p "Выберите накопитель с размещённым файлом обновления (.bin): " choice
 
-if [ "$choice" -eq 0 ]; then
+if [ "$choice" = "0" ]; then
 selected_drive="/opt"
 else
 selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
@@ -196,7 +196,7 @@ echo "00 - Выход в главное меню"
 echo ""
 printf "\033[0m"
 read -p "Выберите файл обновления (от 1 до $count): " choice
-if [ "$choice" -eq 00 ]; then
+if [ "$choice" = "00" ]; then
     main_menu
 fi
 if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
@@ -278,7 +278,7 @@ fi
 echo ""
 read -p "Выберите накопитель: " choice
 
-if [ "$choice" -eq 0 ]; then
+if [ "$choice" = "0" ]; then
 selected_drive="/opt"
 else
 selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
@@ -298,11 +298,11 @@ echo ""
 printf "\033[0m"
 folder_path=$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)
 read -p "Выберите цифру раздела (например для mtd2 это 2): " choice 
-if [ "$choice" -eq 00 ]; then
+if [ "$choice" = "00" ]; then
     main_menu
 fi
 mkdir -p $folder_path
-if [ "$choice" -eq 99 ]; then
+if [ "$choice" = "99" ]; then
 output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
 for i in $(seq 0 $(($output_all_mtd-1)))
 do
@@ -326,8 +326,8 @@ echo ------------------------------------------------------------------------
 echo ""
 sleep 2
 printf "\033[0m"
-echo "Возврат в главное меню через 5 секунд..."
-sleep 5
+echo "Возврат в главное меню через 3 секунды..."
+sleep 3
 main_menu
 }
 
@@ -343,7 +343,7 @@ fi
 echo ""
 read -p "Выберите накопитель: " choice
 
-if [ "$choice" -eq 0 ]; then 
+if [ "$choice" = "0" ]; then
 selected_drive="/opt" 
 else
 selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
@@ -377,7 +377,7 @@ fi
 echo ""
 read -p "Выберите накопитель с размещённым файлом (.bin): " choice
 
-if [ "$choice" -eq 0 ]; then
+if [ "$choice" = "0" ]; then
 selected_drive="/opt"
 else
 selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
@@ -399,7 +399,7 @@ echo "00 - Выход в главное меню"
 echo ""
 printf "\033[0m"
 read -p "Выберите файл для замены: " choice
-if [ "$choice" -eq 00 ]; then
+if [ "$choice" = "00" ]; then
     main_menu
 fi
 if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
@@ -419,7 +419,7 @@ echo ""
 echo "Выбран - $mtdName"
 echo "Внимание! Загрузчик не перезаписывается!"
 read -p "Выберите, какой раздел перезаписать выбранным файлом (например для mtd2 это 2): " choice 
-if [ "$choice" -eq 00 ]; then
+if [ "$choice" = "00" ]; then
     main_menu
 fi
 selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
