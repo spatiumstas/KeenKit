@@ -2,7 +2,7 @@
 
 main_menu() {
 printf "\033c"
-printf "\033[1;36mKeenKit v1.5.1 by spatiumstas\033[0m\n"
+printf "\033[1;36mKeenKit v1.5.2 by spatiumstas\033[0m\n"
 echo ""
 echo "1. Обновить прошивку"
 echo "2. Бекап разделов"
@@ -44,7 +44,11 @@ script_update(){
         mv "$TMP_DIR/$SCRIPT" "/opt/$SCRIPT"
         chmod +x /opt/$SCRIPT
         echo ""
-        printf "\033[1;32mСкрипт успешно обновлен!\033[0m\n"
+            printf "\033[1;32m"
+            echo -e "\n+--------------------------------------------------------------+"
+            echo -e "|                 Скрипт успешно обновлен                      |"
+            echo -e "+--------------------------------------------------------------+\n"
+            printf "\033[0m"
     else
         printf "\033[1;31mОшибка при скачивании скрипта.\033[0m\n"
     fi
@@ -66,7 +70,7 @@ DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '
 echo ""
 printf "\033[1;32mДоступные модели:\033[0m\n"
 i=1
-IFS=$'\n' 
+IFS=$'\n'
 for DIR in $DIRS; do
     printf "\033[1;36m$i. $DIR\033[0m\n"
     i=$((i+1))
@@ -91,7 +95,7 @@ else
 
     echo ""
     read -p "Выберите прошивку: " FILE_NUM
-    FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p") 
+    FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
 
     curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/$FILE" --output /tmp/$FILE
     echo ""
@@ -122,7 +126,7 @@ else
     FirmwareName=$(basename "$Firmware")
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
     case "$item_rc1" in
-        y|Y) 
+        y|Y)
             echo ""
             mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
             result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
@@ -135,11 +139,9 @@ else
             echo "Firmware_2 на mtd$result2 разделе, обновляю..."
             dd if=$Firmware of=/dev/mtdblock$result2
             printf "\033[1;32m"
-            printf "\n"
-            printf "---------------------------------------------------------------\n"
-            printf "              Прошивка успешно обновлена\n"
-            printf "---------------------------------------------------------------\n"
-            printf "\n"
+            echo -e "\n+--------------------------------------------------------------+"
+            echo -e "|                 Прошивка успешно обновлена                   |"
+            echo -e "+--------------------------------------------------------------+\n"
             printf "\033[0m"
             sleep 2
             ;;
@@ -154,12 +156,13 @@ n|N) echo ""
 ;;
 *)
 esac
-echo "Возврат в главное меню через 2 секунды..."
+echo "Возврат в главное меню..."
 sleep 2
 main_menu
 }
 
 firmware_update() {
+tmpFolder="/tmp"
 output=$(mount)
 filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
 echo ""
@@ -177,15 +180,15 @@ else
 selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
 fi
 
-files=$(find $selected_drive -name '*.bin')
+files=$(find $selected_drive $tmpFolder -name '*.bin' -size +5M)
 count=$(echo "$files" | wc -l)
 
 if [ -z "$files" ]; then
-echo ""    
+echo ""
 printf "\033[1;31mПрошивка формата .bin не найдена, скопируйте файл на встроенного хранилище роутера\033[0m\n"
-echo ""  
-echo "Возврат в главное меню через 7 секунд..."
-sleep 7
+echo ""
+echo "Возврат в главное меню..."
+sleep 2
 main_menu
 fi
 echo ""
@@ -227,11 +230,9 @@ mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
     dd if=$Firmware of=/dev/mtdblock$result2
     wait
 printf "\033[1;32m"
-echo ""
-echo ------------------------------------------------------------------------
-echo               "Прошивка успешно обновлена"
-echo ------------------------------------------------------------------------
-echo ""
+echo -e "\n+--------------------------------------------------------------+"
+echo -e "|                 Прошивка успешно обновлена                   |"
+echo -e "+--------------------------------------------------------------+\n"
 sleep 2
 printf "\033[0m"
     echo ""
@@ -256,7 +257,7 @@ n|N) echo ""
 ;;
 *)
 esac
-echo "Возврат в главное меню через 2 секунды..."
+echo "Возврат в главное меню..."
 sleep 2
 main_menu
 ;;
@@ -297,7 +298,7 @@ echo "99 - Бекап всех разделов"
 echo ""
 printf "\033[0m"
 folder_path=$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)
-read -p "Выберите цифру раздела (например для mtd2 это 2): " choice 
+read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
 if [ "$choice" = "00" ]; then
     main_menu
 fi
@@ -307,7 +308,7 @@ output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
 for i in $(seq 0 $(($output_all_mtd-1)))
 do
     mtd_name=$(echo "$output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
-    echo "Копирую mtd$i.$mtd_name.bin..."   
+    echo "Копирую mtd$i.$mtd_name.bin..."
     cat /dev/mtdblock$i > $folder_path/mtd$i.$mtd_name.bin
 done
 
@@ -320,14 +321,13 @@ wait
 fi
 echo ""
 printf "\033[1;32m"
-echo ------------------------------------------------------------------------
-echo               "Раздел успешно скопирован в $folder_path"
-echo ------------------------------------------------------------------------
-echo ""
+echo -e "\n+--------------------------------------------------------------+"
+echo -e "    Раздел успешно скопирован в $folder_path"
+echo -e "+--------------------------------------------------------------+\n"
 sleep 2
 printf "\033[0m"
-echo "Возврат в главное меню через 3 секунды..."
-sleep 3
+echo "Возврат в главное меню..."
+sleep 2
 main_menu
 }
 
@@ -344,7 +344,7 @@ echo ""
 read -p "Выберите накопитель: " choice
 
 if [ "$choice" = "0" ]; then
-selected_drive="/opt" 
+selected_drive="/opt"
 else
 selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
 fi
@@ -354,14 +354,13 @@ tar cvzf "$selected_drive/mipsel_backup.tar.gz" -C /opt .
 wait
 echo ""
 printf "\033[1;32m"
-echo ----------------------------------------------------------------
-echo               "Бекап успешно выполнен"
-echo ----------------------------------------------------------------
-echo ""
+echo -e "\n+--------------------------------------------------------------+"
+echo -e "|                 Бекап успешно выполнен                       |"
+echo -e "+--------------------------------------------------------------+\n"
 sleep 2
 printf "\033[0m"
-echo "Возврат в главное меню через 5 секунд..."
-sleep 5
+echo "Возврат в главное меню..."
+sleep 4
 main_menu
 }
 
@@ -385,10 +384,10 @@ fi
 files=$(find $selected_drive -name '*.bin')
 count=$(echo "$files" | wc -l)
 if [ -z "$files" ]; then
-echo ""    
+echo ""
 printf "\033[1;31mBin файл не найден в выбранном хранилище\033[0m\n"
-echo "Возврат в главное меню через 5 секунд..."
-sleep 5
+echo "Возврат в главное меню..."
+sleep 2
 main_menu
 fi
 echo "Доступные файлы:"
@@ -418,7 +417,7 @@ echo "00 - Выход в главное меню"
 echo ""
 echo "Выбран - $mtdName"
 echo "Внимание! Загрузчик не перезаписывается!"
-read -p "Выберите, какой раздел перезаписать выбранным файлом (например для mtd2 это 2): " choice 
+read -p "Выберите, какой раздел перезаписать выбранным файлом (например для mtd2 это 2): " choice
 if [ "$choice" = "00" ]; then
     main_menu
 fi
@@ -435,10 +434,9 @@ wait
 sleep 2
 echo ""
 printf "\033[1;32m"
-echo ------------------------------------------------------------------
-echo               "Раздел успешно перезаписан"
-echo ------------------------------------------------------------------
-echo ""
+echo -e "\n+--------------------------------------------------------------+"
+echo -e "|                 Раздел успешно перезаписан                   |"
+echo -e "+--------------------------------------------------------------+\n"
 sleep 2
 printf "\033[0m"
 read -p "Перезагрузить роутер? (y/n) " item_rc2
@@ -450,8 +448,8 @@ n|N) echo ""
 ;;
 *)
 esac
-echo "Возврат в главное меню через 3 секунды..."
-sleep 3
+echo "Возврат в главное меню..."
+sleep 2
 main_menu
 ;;
 n|N) main_menu
