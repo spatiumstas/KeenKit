@@ -3,10 +3,11 @@ RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
+USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.5.3 by spatiumstas${NC}\n"
+  printf "${CYAN}KeenKit v1.5.3 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бекап разделов"
@@ -36,7 +37,6 @@ main_menu() {
 }
 
 script_update() {
-  USER="spatiumstas"
   REPO="KeenKit"
   SCRIPT="keenkit.sh"
   TMP_DIR="/tmp"
@@ -65,7 +65,6 @@ script_update() {
 }
 
 ota_update() {
-  USER="spatiumstas"
   REPO="osvault"
 
   if ! opkg list-installed | grep -q "^curl"; then
@@ -103,17 +102,18 @@ ota_update() {
     echo ""
     read -p "Выберите прошивку: " FILE_NUM
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
-
+    echo ""
+    echo "Загружаю прошивку..."
     if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/$FILE" --output /tmp/$FILE; then
-      printf "${RED}Не удалось скачать файл $FILE.${NC}\n"
+      printf "${RED}Не удалось загрузить файл $FILE.${NC}\n"
       exit 1
     fi
     echo ""
 
     if [ -f "/tmp/$FILE" ]; then
-      printf "${GREEN}Файл $FILE успешно скачан.${NC}\n"
+      printf "${GREEN}Файл $FILE успешно загружен.${NC}\n"
     else
-      printf "${RED}Файл $FILE не был скачан/найден.${NC}\n"
+      printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
       exit 1
     fi
     curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/md5sum" --output /tmp/md5sum
