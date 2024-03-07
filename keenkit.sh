@@ -92,7 +92,7 @@ ota_update() {
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
   else
-    printf "\n${GREEN}Прошивки для $DIR:${NC}\n"
+    printf "\nПрошивки для $DIR:\n"
     i=1
     for FILE in $BIN_FILES; do
       printf "${CYAN}$i. $FILE${NC}\n"
