@@ -404,6 +404,7 @@ rewrite_block() {
     sleep 3
     main_menu
   fi
+  echo ""
   echo "Доступные файлы:"
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   echo ""
@@ -422,20 +423,19 @@ rewrite_block() {
   mtdFile=$(echo "$files" | awk "NR==$choice")
   mtdName=$(basename "$mtdFile")
   echo ""
-  echo ""
   output=$(cat /proc/mtd)
   echo "$output" | awk 'NR>1 {print $0}'
+  echo ""
   printf "${CYAN}00 - Выход в главное меню${NC}\n"
   echo ""
-  echo "Выбран - $mtdName"
-  echo "Внимание! Загрузчик не перезаписывается!"
-  read -p "Выберите, какой раздел перезаписать выбранным файлом (например для mtd2 это 2): " choice
+  printf "${GREEN}Выбран $mtdName для замены${NC}\n"
+  printf "${RED}Внимание, загрузчик не перезаписывается!${NC}\n"
+  read -p "Выберите, какой раздел перезаписать (например для mtd2 это 2): " choice
   if [ "$choice" = "00" ]; then
     main_menu
   fi
   selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
   echo ""
-  printf "${GREEN}Выбран mtd$choice.$selected_mtd для замены${NC}\n"
   read -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
   case "$item_rc1" in
   y | Y)
