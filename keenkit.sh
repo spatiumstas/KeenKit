@@ -214,10 +214,7 @@ firmware_update() {
   echo ""
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   echo ""
-  printf "${CYAN}"
-  echo "00 - Выход в главное меню"
-  echo ""
-  printf "${NC}"
+  printf "${CYAN}00 - Выход в главное меню${NC}\n"
   read -p "Выберите файл обновления (от 1 до $count): " choice
   if [ "$choice" = "00" ]; then
     main_menu
@@ -305,7 +302,7 @@ backup_block() {
 
   output=$(cat /proc/mtd)
   echo -e "\n"
-  echo "${GREEN}Доступные разделы:${NC}"
+  printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
   echo -e "\n"
   printf "${CYAN}00 - Выход в главное меню\n"
@@ -410,10 +407,8 @@ rewrite_block() {
   echo "Доступные файлы:"
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   echo ""
-  printf "${CYAN}"
-  echo "00 - Выход в главное меню"
+  printf "${CYAN}00 - Выход в главное меню${NC}\n"
   echo ""
-  printf "${NC}"
   read -p "Выберите файл для замены: " choice
   if [ "$choice" = "00" ]; then
     main_menu
@@ -430,7 +425,7 @@ rewrite_block() {
   echo ""
   output=$(cat /proc/mtd)
   echo "$output" | awk 'NR>1 {print $0}'
-  echo "00 - Выход в главное меню"
+  printf "${CYAN}00 - Выход в главное меню${NC}\n"
   echo ""
   echo "Выбран - $mtdName"
   echo "Внимание! Загрузчик не перезаписывается!"
@@ -440,7 +435,7 @@ rewrite_block() {
   fi
   selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
   echo ""
-  echo "Выбран mtd$choice.$selected_mtd для замены"
+  printf "${GREEN}Выбран mtd$choice.$selected_mtd для замены${NC}\n"
   read -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
   case "$item_rc1" in
   y | Y)
