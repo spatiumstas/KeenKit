@@ -7,7 +7,7 @@ USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.5.3 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.5.4 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бекап разделов"
@@ -19,6 +19,7 @@ main_menu() {
   echo "99. Обновить скрипт"
   echo ""
   read -p "Выберите действие: " choice
+  choice=$(echo "$choice" | tr -d ' ')
 
   case "$choice" in
   1) firmware_update ;;
@@ -85,6 +86,7 @@ ota_update() {
 
   echo ""
   read -p "Выберите модель: " DIR_NUM
+  DIR_NUM=$(echo "$DIR_NUM" | tr -d ' ')
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
   BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$DIR" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
@@ -101,6 +103,7 @@ ota_update() {
 
     echo ""
     read -p "Выберите прошивку: " FILE_NUM
+    FILE_NUM=$(echo "$FILE_NUM" | tr -d ' ')
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     echo ""
     echo "Загружаю прошивку..."
@@ -135,6 +138,7 @@ ota_update() {
     Firmware="/tmp/$FILE"
     FirmwareName=$(basename "$Firmware")
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
+    item_rc1=$(echo "$item_rc1" | tr -d ' ')
     case "$item_rc1" in
     y | Y)
       echo ""
@@ -158,6 +162,7 @@ ota_update() {
     esac
   fi
   read -p "Перезагрузить роутер? (y/n) " item_rc1
+  item_rc1=$(echo "$item_rc1" | tr -d ' ')
   case "$item_rc1" in
   y | Y)
     echo ""
@@ -192,7 +197,8 @@ firmware_update() {
     echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
   fi
   echo ""
-  read -p "Выберите накопитель с размещённым файлом обновления (.bin): " choice
+  read -p "Выберите накопитель с размещённым файлом обновления: " choice
+  choice=$(echo "$choice" | tr -d ' ')
 
   if [ "$choice" = "0" ]; then
     selected_drive="/opt"
@@ -216,6 +222,7 @@ firmware_update() {
   echo ""
   printf "${CYAN}00 - Выход в главное меню${NC}\n"
   read -p "Выберите файл обновления (от 1 до $count): " choice
+  choice=$(echo "$choice" | tr -d ' ')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
@@ -230,6 +237,7 @@ firmware_update() {
   echo ""
   printf "${GREEN}"
   read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
+  item_rc1=$(echo "$item_rc1" | tr -d ' ')
   printf "${NC}"
   case "$item_rc1" in
   y | Y)
@@ -248,6 +256,7 @@ firmware_update() {
     printf "${NC}"
     echo ""
     read -p "Удалить файл обновления? (y/n) " item_rc2
+    item_rc2=$(echo "$item_rc2" | tr -d ' ')
     case "$item_rc2" in
     y | Y)
       rm $Firmware
@@ -261,6 +270,7 @@ firmware_update() {
     esac
 
     read -p "Перезагрузить роутер? (y/n) " item_rc3
+    item_rc3=$(echo "$item_rc3" | tr -d ' ')
     case "$item_rc3" in
     y | Y)
       echo ""
@@ -293,6 +303,7 @@ backup_block() {
   fi
   echo -e "\n"
   read -p "Выберите накопитель: " choice
+  choice=$(echo "$choice" | tr -d ' ')
 
   if [ "$choice" = "0" ]; then
     selected_drive="/opt"
@@ -310,6 +321,7 @@ backup_block() {
   echo -e "\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
+  choice=$(echo "$choice" | tr -d ' ')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
@@ -352,6 +364,7 @@ backup_entware() {
   fi
   echo ""
   read -p "Выберите накопитель: " choice
+  choice=$(echo "$choice" | tr -d ' ')
 
   if [ "$choice" = "0" ]; then
     selected_drive="/opt"
@@ -388,7 +401,8 @@ rewrite_block() {
     echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
   fi
   echo ""
-  read -p "Выберите накопитель с размещённым файлом (.bin): " choice
+  read -p "Выберите накопитель с размещённым файлом: " choice
+  choice=$(echo "$choice" | tr -d ' ')
 
   if [ "$choice" = "0" ]; then
     selected_drive="/opt"
@@ -411,6 +425,7 @@ rewrite_block() {
   printf "${CYAN}00 - Выход в главное меню${NC}\n"
   echo ""
   read -p "Выберите файл для замены: " choice
+  choice=$(echo "$choice" | tr -d ' ')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
@@ -431,45 +446,68 @@ rewrite_block() {
   printf "${GREEN}Выбран $mtdName для замены${NC}\n"
   printf "${RED}Внимание, загрузчик не перезаписывается!${NC}\n"
   read -p "Выберите, какой раздел перезаписать (например для mtd2 это 2): " choice
+  choice=$(echo "$choice" | tr -d ' ')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
   selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
   echo ""
-  read -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
+  read -r -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
+  item_rc1=$(echo "$item_rc1" | tr -d ' ')
   case "$item_rc1" in
   y | Y)
     sleep 2
     echo ""
     dd if=$mtdFile of=/dev/mtdblock$choice
     wait
-    echo ""
-    printf "${GREEN}"
-    echo -e "\n+--------------------------------------------------------------+"
-    echo -e "|                 Раздел успешно перезаписан                   |"
-    echo -e "+--------------------------------------------------------------+\n"
-    sleep 1
-    printf "${NC}"
-    read -p "Перезагрузить роутер? (y/n) " item_rc2
-    case "$item_rc2" in
-    y | Y)
+    second_mtd=$(echo "$output" | grep -v "^mtd$choice" | awk -v name=$selected_mtd 'BEGIN{IGNORECASE=1} $0 ~ name {print substr($0, index($0,$4)); exit}' | grep -oP '(?<=\").*(?=\")')
+    if [ -n "$second_mtd" ]; then
       echo ""
-      reboot
-      ;;
-    n | N)
-      echo ""
-      ;;
-    *) ;;
-    esac
-    echo "Возврат в главное меню..."
-    sleep 1
-    main_menu
+      printf "${CYAN}"
+      read -r -p "Обнаружен второй раздел $second_mtd, также перезаписать? (y/n) " item_rc2
+      item_rc2=$(echo "$item_rc2" | tr -d ' ')
+      printf "${NC}"
+      case "$item_rc2" in
+      y | Y)
+        second_choice=$(echo "$output" | awk -v name=$second_mtd 'BEGIN{IGNORECASE=1} $0 ~ name {print substr($1, 4)}')
+        sleep 2
+        echo ""
+        dd if=$mtdFile of=/dev/mtdblock$second_choice
+        wait
+        ;;
+      n | N)
+        echo ""
+        ;;
+      *) ;;
+      esac
+    fi
     ;;
   n | N)
-    main_menu
+    echo ""
+    ;;
+  esac
+  echo ""
+  printf "${GREEN}"
+  echo -e "\n+--------------------------------------------------------------+"
+  echo -e "|                 Раздел успешно перезаписан                   |"
+  echo -e "+--------------------------------------------------------------+\n"
+  sleep 1
+  printf "${NC}"
+  read -r -p "Перезагрузить роутер? (y/n) " item_rc2
+  item_rc2=$(echo "$item_rc2" | tr -d ' ')
+  case "$item_rc2" in
+  y | Y)
+    echo ""
+    reboot
+    ;;
+  n | N)
+    echo ""
     ;;
   *) ;;
   esac
+  echo "Возврат в главное меню..."
+  sleep 1
+  main_menu
 }
 
 main_menu
