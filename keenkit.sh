@@ -76,7 +76,7 @@ ota_update() {
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
 
   echo ""
-  printf "${GREEN}Доступные модели:${NC}\n"
+  echo "Доступные модели:"
   i=1
   IFS=$'\n'
   for DIR in $DIRS; do
