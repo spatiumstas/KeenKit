@@ -13,7 +13,7 @@ main_menu() {
   echo "2. Бекап разделов"
   echo "3. Бекап Entware"
   echo "4. Заменить раздел"
-  echo "5. OTA Update (beta)"
+  echo "5. OTA Update"
   echo ""
   echo "00. Выход"
   echo "99. Обновить скрипт"
