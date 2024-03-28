@@ -377,7 +377,7 @@ backup_entware() {
   fi
 
   echo "Запускаю бекап..."
-  tar cvzf "$selected_drive/mipsel_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz" -C /opt .
+  tar cvzf "$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz" -C /opt .
   wait
   echo ""
   printf "${GREEN}"
