@@ -460,33 +460,54 @@ rewrite_block() {
     echo ""
     dd if=$mtdFile of=/dev/mtdblock$choice
     wait
-    echo ""
-    printf "${GREEN}"
-    echo -e "\n+--------------------------------------------------------------+"
-    echo -e "|                 Раздел успешно перезаписан                   |"
-    echo -e "+--------------------------------------------------------------+\n"
-    sleep 1
-    printf "${NC}"
-    read -p "Перезагрузить роутер? (y/n) " item_rc2
-    case "$item_rc2" in
-    y | Y)
+    second_mtd=$(echo "$output" | grep -v "^mtd$choice" | awk -v name=$selected_mtd 'BEGIN{IGNORECASE=1} $0 ~ name {print substr($0, index($0,$4)); exit}' | grep -oP '(?<=\").*(?=\")')
+    if [ -n "$second_mtd" ]; then
       echo ""
-      reboot
-      ;;
-    n | N)
-      echo ""
-      ;;
-    *) ;;
-    esac
-    echo "Возврат в главное меню..."
-    sleep 1
-    main_menu
+      printf "${CYAN}"
+      read -r -p "Обнаружен второй раздел $second_mtd, также перезаписать? (y/n) " item_rc2
+      item_rc2=$(echo "$item_rc2" | tr -d ' ')
+      printf "${NC}"
+      case "$item_rc2" in
+      y | Y)
+        second_choice=$(echo "$output" | awk -v name=$second_mtd 'BEGIN{IGNORECASE=1} $0 ~ name {print substr($1, 4)}')
+        sleep 2
+        echo ""
+        dd if=$mtdFile of=/dev/mtdblock$second_choice
+        wait
+        ;;
+      n | N)
+        echo ""
+        ;;
+      *) ;;
+      esac
+    fi
     ;;
   n | N)
-    main_menu
+    echo ""
+    ;;
+  esac
+  echo ""
+  printf "${GREEN}"
+  echo -e "\n+--------------------------------------------------------------+"
+  echo -e "|                 Раздел успешно перезаписан                   |"
+  echo -e "+--------------------------------------------------------------+\n"
+  sleep 1
+  printf "${NC}"
+  read -r -p "Перезагрузить роутер? (y/n) " item_rc2
+  item_rc2=$(echo "$item_rc2" | tr -d ' ')
+  case "$item_rc2" in
+  y | Y)
+    echo ""
+    reboot
+    ;;
+  n | N)
+    echo ""
     ;;
   *) ;;
   esac
+  echo "Возврат в главное меню..."
+  sleep 1
+  main_menu
 }
 
 main_menu
