@@ -65,6 +65,34 @@ successful_message() {
   main_menu
 }
 
+identify_external_drive() {
+  local message=$1
+  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
+
+  if [ -z "$filtered_output" ]; then
+    selected_drive="/opt"
+  else
+    echo ""
+    echo "Доступные накопители:"
+    echo "0. Встроенное хранилище (может не хватить места)"
+    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
+    echo ""
+    read -p "Выберите накопитель: " choice
+    choice=$(echo "$choice" | tr -d ' ')
+
+    if [ "$choice" = "0" ]; then
+      selected_drive="/opt"
+    else
+      selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
+      if [ -z "$selected_drive" ]; then
+        echo "Недопустимый выбор. Пожалуйста, попробуйте еще раз."
+        sleep 2
+        main_menu
+      fi
+    fi
+  fi
+}
+
 script_update() {
   REPO="KeenKit"
   SCRIPT="keenkit.sh"
@@ -95,10 +123,10 @@ ota_update() {
   REPO="osvault"
 
   if ! opkg list-installed | grep -q "^curl"; then
-      printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
-      echo ""
-      opkg update
-      opkg install curl
+    printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
+    echo ""
+    opkg update
+    opkg install curl
   fi
 
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
@@ -214,23 +242,7 @@ update_firmware_block() {
 
 firmware_manual_update() {
   output=$(mount)
-  filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
-  echo ""
-  echo "Доступные накопители:"
-  echo "0. Встроенное хранилище"
-  if [ -n "$filtered_output" ]; then
-    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
-  fi
-  echo ""
-  read -p "Выберите накопитель с размещённым файлом обновления: " choice
-  choice=$(echo "$choice" | tr -d ' ')
-
-  if [ "$choice" = "0" ]; then
-    selected_drive="/opt"
-  else
-    selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
-  fi
-
+  identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
   files=$(find $selected_drive -name '*.bin' -size +10M)
   count=$(echo "$files" | wc -l)
 
@@ -314,28 +326,12 @@ firmware_manual_update() {
 
 backup_block() {
   output=$(mount)
-  filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
-  echo ""
-  echo "Доступные накопители:"
-  echo "0. Встроенное хранилище (может не хватить места)"
-  if [ -n "$filtered_output" ]; then
-    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
-  fi
-  echo ""
-  read -p "Выберите накопитель: " choice
-  choice=$(echo "$choice" | tr -d ' ')
-
-  if [ "$choice" = "0" ]; then
-    selected_drive="/opt"
-  else
-    selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
-  fi
-
+  identify_external_drive "Доступные накопители:"
+  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
   output=$(cat /proc/mtd)
   echo ""
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
-  echo -e "\n"
   printf "${CYAN}00 - Выход в главное меню\n"
   printf "99 - Бекап всех разделов${NC}"
   echo -e "\n"
@@ -362,40 +358,15 @@ backup_block() {
     wait
   fi
   echo ""
-  successful_message "Раздел успешно скопирован в $folder_path"
+  successful_message "Раздел успешно сохранён в $folder_path"
   echo "Возврат в главное меню..."
-  sleep 2
+  sleep 4
   main_menu
 }
 
 backup_entware() {
   output=$(mount)
-  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
-
-  if [ -z "$filtered_output" ]; then
-    echo "Внешний накопитель не обнаружен. Будет использовано встроенное хранилище."
-    sleep 3
-    selected_drive="/opt"
-  else
-    echo ""
-    echo "Доступные накопители:"
-    echo "0. Встроенное хранилище (может не хватить места)"
-    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
-    echo ""
-    read -p "Выберите накопитель: " choice
-    choice=$(echo "$choice" | tr -d ' ')
-
-    if [ "$choice" = "0" ]; then
-      selected_drive="/opt"
-    else
-      selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
-      if [ -z "$selected_drive" ]; then
-        echo "Недопустимый выбор. Пожалуйста, попробуйте еще раз."
-        sleep 2
-        main_menu
-      fi
-    fi
-  fi
+  identify_external_drive
   echo ""
   echo "Выполняю копирование..."
   backup_output=$(tar cvzf "$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz" -C /opt . 2>&1)
@@ -406,28 +377,13 @@ backup_entware() {
   echo ""
   successful_message "Бекап успешно скопирован в $backup_output"
   echo "Возврат в главное меню..."
-  sleep 2
+  sleep 3
   main_menu
 }
 
 rewrite_block() {
   output=$(mount)
-  filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
-  echo ""
-  echo "Доступные накопители:"
-  echo "0. Встроенное хранилище"
-  if [ -n "$filtered_output" ]; then
-    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
-  fi
-  echo ""
-  read -p "Выберите накопитель с размещённым файлом: " choice
-  choice=$(echo "$choice" | tr -d ' ')
-
-  if [ "$choice" = "0" ]; then
-    selected_drive="/opt"
-  else
-    selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
-  fi
+  identify_external_drive
   files=$(find $selected_drive -name '*.bin')
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
