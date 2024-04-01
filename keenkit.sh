@@ -22,7 +22,7 @@ main_menu() {
   choice=$(echo "$choice" | tr -d ' ')
 
   case "$choice" in
-  1) firmware_update ;;
+  1) firmware_manual_update ;;
   2) backup_block ;;
   3) backup_entware ;;
   4) rewrite_block ;;
@@ -178,7 +178,7 @@ ota_update() {
   main_menu
 }
 
-update_firmware() {
+update_firmware_block() {
   local firmware=$1
   local mtdblock=$2
 
@@ -187,7 +187,7 @@ update_firmware() {
   wait
 }
 
-firmware_update() {
+firmware_manual_update() {
   output=$(mount)
   filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
   echo ""
@@ -244,11 +244,11 @@ firmware_update() {
     echo ""
     mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
     result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-    update_firmware $Firmware $result
+    update_firmware_block $Firmware $result
     echo ""
     mtdSlot2="$(grep -w '/proc/mtd' -e 'Firmware_2')"
     result2=$(echo "$mtdSlot2" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-    update_firmware $Firmware $result2
+    update_firmware_block $Firmware $result2
     printf "${GREEN}"
     echo -e "\n+--------------------------------------------------------------+"
     echo -e "|                 Прошивка успешно обновлена                   |"
@@ -295,13 +295,13 @@ firmware_update() {
 backup_block() {
   output=$(mount)
   filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
-  echo -e "\n"
+  echo ""
   echo "Доступные накопители:"
   echo "0. Встроенное хранилище (может не хватить места)"
   if [ -n "$filtered_output" ]; then
     echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
   fi
-  echo -e "\n"
+  echo ""
   read -p "Выберите накопитель: " choice
   choice=$(echo "$choice" | tr -d ' ')
 
@@ -312,7 +312,7 @@ backup_block() {
   fi
 
   output=$(cat /proc/mtd)
-  echo -e "\n"
+  echo ""
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
   echo -e "\n"
