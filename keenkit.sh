@@ -7,7 +7,7 @@ USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.5.4 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бекап разделов"
@@ -37,6 +37,34 @@ main_menu() {
   esac
 }
 
+exception_error() {
+  local message=$1
+  local len=${#message}
+  local border=$(printf '%0.s-' $(seq 1 $((len + 2))))
+
+  printf "${RED}"
+  echo -e "\n+${border}+"
+  echo -e "| ${message} |"
+  echo -e "+${border}+\n"
+  printf "${NC}"
+  sleep 3
+  main_menu
+}
+
+successful_message() {
+  local message=$1
+  local len=${#message}
+  local border=$(printf '%0.s-' $(seq 1 $((len + 2))))
+
+  printf "${GREEN}"
+  echo -e "\n+${border}+"
+  echo -e "| ${message} |"
+  echo -e "+${border}+\n"
+  printf "${NC}"
+  sleep 3
+  main_menu
+}
+
 script_update() {
   REPO="KeenKit"
   SCRIPT="keenkit.sh"
@@ -44,6 +72,7 @@ script_update() {
 
   if ! opkg list-installed | grep -q "^curl"; then
     echo "Пакет curl не найден, устанавливаем..."
+    opkg update
     opkg install curl
   fi
 
@@ -53,13 +82,9 @@ script_update() {
     mv "$TMP_DIR/$SCRIPT" "/opt/$SCRIPT"
     chmod +x /opt/$SCRIPT
     echo ""
-    printf "${GREEN}"
-    echo -e "\n+--------------------------------------------------------------+"
-    echo -e "|                 Скрипт успешно обновлён                      |"
-    echo -e "+--------------------------------------------------------------+\n"
-    printf "${NC}"
+    successful_message "Скрипт успешно обновлён"
   else
-    printf "${RED}Ошибка при скачивании скрипта.${NC}\n"
+    exception_error "Ошибка при скачивании скрипта"
   fi
   sleep 2
   /opt/$SCRIPT
@@ -108,7 +133,7 @@ ota_update() {
     echo ""
     echo "Загружаю прошивку..."
     if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/$FILE" --output /tmp/$FILE; then
-      printf "${RED}Не удалось загрузить файл $FILE.${NC}\n"
+      exception_error "}Не удалось загрузить файл $FILE"
       exit 1
     fi
     echo ""
@@ -128,11 +153,12 @@ ota_update() {
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
     else
-      printf "${RED}MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ${NC}\n"
+      exception_error "MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ"
       echo "Ожидаемый - $MD5SUM"
       echo "Фактический - $FILE_MD5SUM"
-
-      exit 1
+      rm $FILE
+      sleep 2
+      main_menu
     fi
     echo ""
     Firmware="/tmp/$FILE"
@@ -152,15 +178,11 @@ ota_update() {
       result2=$(echo "$mtdSlot2" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
       echo "Firmware_2 на mtd$result2 разделе, обновляю..."
       dd if=$Firmware of=/dev/mtdblock$result2
-      printf "${GREEN}"
-      echo -e "\n+--------------------------------------------------------------+"
-      echo -e "|                 Прошивка успешно обновлена                   |"
-      echo -e "+--------------------------------------------------------------+\n"
-      printf "${NC}"
-      sleep 1
+      successful_message "Прошивка успешно обновлена"
       ;;
     esac
   fi
+  rm $FILE
   read -p "Перезагрузить роутер? (y/n) " item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' ')
   case "$item_rc1" in
@@ -211,10 +233,9 @@ firmware_manual_update() {
 
   if [ -z "$files" ]; then
     echo ""
-    printf "${RED}Файл обновления не найден на встроенном хранилище${NC}\n"
-    echo ""
+    exception_error "Файл обновления не найден"
     echo "Возврат в главное меню..."
-    sleep 3
+    sleep 2
     main_menu
   fi
   echo ""
@@ -249,12 +270,8 @@ firmware_manual_update() {
     mtdSlot2="$(grep -w '/proc/mtd' -e 'Firmware_2')"
     result2=$(echo "$mtdSlot2" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
     update_firmware_block $Firmware $result2
-    printf "${GREEN}"
-    echo -e "\n+--------------------------------------------------------------+"
-    echo -e "|                 Прошивка успешно обновлена                   |"
-    echo -e "+--------------------------------------------------------------+\n"
-    printf "${NC}"
     echo ""
+    successful_message "Прошивка успешно обновлена"
     read -p "Удалить файл обновления? (y/n) " item_rc2
     item_rc2=$(echo "$item_rc2" | tr -d ' ')
     case "$item_rc2" in
@@ -341,13 +358,8 @@ backup_block() {
     dd if="/dev/mtd$choice" of="$folder_path/mtd$choice.$selected_mtd.bin"
     wait
   fi
-  echo -e "\n"
-  printf "${GREEN}"
-  echo -e "\n+--------------------------------------------------------------+"
-  echo -e "    Раздел успешно скопирован в $folder_path"
-  echo -e "+--------------------------------------------------------------+\n"
-  sleep 2
-  printf "${NC}"
+  echo ""
+  successful_message "Раздел успешно скопирован в $folder_path"
   echo "Возврат в главное меню..."
   sleep 2
   main_menu
@@ -355,37 +367,41 @@ backup_block() {
 
 backup_entware() {
   output=$(mount)
-  filtered_output=$(echo "$output" | grep "tmp/mnt/" | awk '{print $3}')
-  echo ""
-  echo "Доступные накопители:"
-  echo "0. Встроенное хранилище (может не хватить места)"
-  if [ -n "$filtered_output" ]; then
-    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
-  fi
-  echo ""
-  read -p "Выберите накопитель: " choice
-  choice=$(echo "$choice" | tr -d ' ')
+  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
 
-  if [ "$choice" = "0" ]; then
+  if [ -z "$filtered_output" ]; then
+    echo "Внешний накопитель не обнаружен. Будет использовано встроенное хранилище."
+    sleep 3
     selected_drive="/opt"
   else
-    selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
-    if [ -z "$selected_drive" ]; then
-      echo "Недопустимый выбор. Пожалуйста, попробуйте еще раз."
-      return 1
+    echo ""
+    echo "Доступные накопители:"
+    echo "0. Встроенное хранилище (может не хватить места)"
+    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
+    echo ""
+    read -p "Выберите накопитель: " choice
+    choice=$(echo "$choice" | tr -d ' ')
+
+    if [ "$choice" = "0" ]; then
+      selected_drive="/opt"
+    else
+      selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
+      if [ -z "$selected_drive" ]; then
+        echo "Недопустимый выбор. Пожалуйста, попробуйте еще раз."
+        sleep 2
+        main_menu
+      fi
     fi
   fi
-
-  echo "Запускаю бекап..."
-  tar cvzf "$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz" -C /opt .
+  echo ""
+  echo "Выполняю копирование..."
+  backup_output=$(tar cvzf "$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz" -C /opt . 2>&1)
+  if echo "$backup_output" | grep -q "error"; then
+    exception_error
+  fi
   wait
   echo ""
-  printf "${GREEN}"
-  echo -e "\n+--------------------------------------------------------------+"
-  echo -e "|                 Бекап успешно выполнен                       |"
-  echo -e "+--------------------------------------------------------------+\n"
-  sleep 2
-  printf "${NC}"
+  successful_message "Бекап успешно скопирован в $backup_output"
   echo "Возврат в главное меню..."
   sleep 2
   main_menu
@@ -413,9 +429,9 @@ rewrite_block() {
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
     echo ""
-    printf "${RED}Bin файл не найден в выбранном хранилище${NC}\n"
+    exception_error "Bin файл не найден в выбранном хранилище"
     echo "Возврат в главное меню..."
-    sleep 3
+    sleep 1
     main_menu
   fi
   echo ""
@@ -487,11 +503,7 @@ rewrite_block() {
     ;;
   esac
   echo ""
-  printf "${GREEN}"
-  echo -e "\n+--------------------------------------------------------------+"
-  echo -e "|                 Раздел успешно перезаписан                   |"
-  echo -e "+--------------------------------------------------------------+\n"
-  sleep 1
+  successful_message "Раздел успешно перезаписан"
   printf "${NC}"
   read -r -p "Перезагрузить роутер? (y/n) " item_rc2
   item_rc2=$(echo "$item_rc2" | tr -d ' ')
