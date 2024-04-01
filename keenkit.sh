@@ -71,7 +71,8 @@ script_update() {
   TMP_DIR="/tmp"
 
   if ! opkg list-installed | grep -q "^curl"; then
-    echo "Пакет curl не найден, устанавливаем..."
+    printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
+    echo ""
     opkg update
     opkg install curl
   fi
@@ -94,8 +95,10 @@ ota_update() {
   REPO="osvault"
 
   if ! opkg list-installed | grep -q "^curl"; then
-    echo "${RED}Пакет curl не найден, устанавливаем...${NC}"
-    opkg install curl
+      printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
+      echo ""
+      opkg update
+      opkg install curl
   fi
 
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
