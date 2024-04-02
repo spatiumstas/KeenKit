@@ -4,7 +4,6 @@
 2. chmod +x /opt/keenkit.sh
 3. Запустить через /opt/keenkit.sh
 
-![Screenshot_3](https://github.com/spatiumstas/KeenKit/assets/79056064/a6250570-c5ac-489f-b632-c45acf5beda3)
+![image](https://github.com/spatiumstas/KeenKit/assets/79056064/e6a81609-1e5e-406a-9235-927259395b25)
 
 
- https://www.donationalerts.com/r/spatiumstas
