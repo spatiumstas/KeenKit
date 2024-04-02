@@ -47,8 +47,7 @@ exception_error() {
   echo -e "| ${message} |"
   echo -e "+${border}+\n"
   printf "${NC}"
-  sleep 3
-  main_menu
+  sleep 2
 }
 
 successful_message() {
@@ -61,8 +60,7 @@ successful_message() {
   echo -e "| ${message} |"
   echo -e "+${border}+\n"
   printf "${NC}"
-  sleep 3
-  main_menu
+  sleep 1
 }
 
 identify_external_drive() {
@@ -464,9 +462,9 @@ rewrite_block() {
   echo ""
   successful_message "Раздел успешно перезаписан"
   printf "${NC}"
-  read -r -p "Перезагрузить роутер? (y/n) " item_rc2
-  item_rc2=$(echo "$item_rc2" | tr -d ' ')
-  case "$item_rc2" in
+  read -r -p "Перезагрузить роутер? (y/n) " item_rc3
+  item_rc3=$(echo "$item_rc3" | tr -d ' ')
+  case "$item_rc3" in
   y | Y)
     echo ""
     reboot
