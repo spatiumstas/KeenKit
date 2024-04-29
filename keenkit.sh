@@ -7,7 +7,7 @@ USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.1 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бекап разделов"
@@ -19,7 +19,7 @@ main_menu() {
   echo "99. Обновить скрипт"
   echo ""
   read -p "Выберите действие: " choice
-  choice=$(echo "$choice" | tr -d ' ')
+  choice=$(echo "$choice" | tr -d ' \n\r')
 
   case "$choice" in
   1) firmware_manual_update ;;
@@ -62,6 +62,14 @@ successful_message() {
   printf "${NC}"
   sleep 1
 }
+packages_checker() {
+  if ! opkg list-installed | grep -q "^curl"; then
+    printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
+    echo ""
+    opkg update
+    opkg install curl
+  fi
+}
 
 identify_external_drive() {
   local message=$1
@@ -76,7 +84,7 @@ identify_external_drive() {
     echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
     echo ""
     read -p "Выберите накопитель: " choice
-    choice=$(echo "$choice" | tr -d ' ')
+    choice=$(echo "$choice" | tr -d ' \n\r')
 
     if [ "$choice" = "0" ]; then
       selected_drive="/opt"
@@ -96,13 +104,7 @@ script_update() {
   SCRIPT="keenkit.sh"
   TMP_DIR="/tmp"
 
-  if ! opkg list-installed | grep -q "^curl"; then
-    printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
-    echo ""
-    opkg update
-    opkg install curl
-  fi
-
+  packages_checker
   curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/keenkit.sh" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
@@ -120,13 +122,7 @@ script_update() {
 ota_update() {
   REPO="osvault"
 
-  if ! opkg list-installed | grep -q "^curl"; then
-    printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
-    echo ""
-    opkg update
-    opkg install curl
-  fi
-
+  packages_checker
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
 
   echo ""
@@ -140,7 +136,7 @@ ota_update() {
 
   echo ""
   read -p "Выберите модель: " DIR_NUM
-  DIR_NUM=$(echo "$DIR_NUM" | tr -d ' ')
+  DIR_NUM=$(echo "$DIR_NUM" | tr -d ' \n\r')
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
   BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$DIR" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
@@ -157,7 +153,7 @@ ota_update() {
 
     echo ""
     read -p "Выберите прошивку: " FILE_NUM
-    FILE_NUM=$(echo "$FILE_NUM" | tr -d ' ')
+    FILE_NUM=$(echo "$FILE_NUM" | tr -d ' \n\r')
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     echo ""
     echo "Загружаю прошивку..."
@@ -193,27 +189,16 @@ ota_update() {
     Firmware="/tmp/$FILE"
     FirmwareName=$(basename "$Firmware")
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
-    item_rc1=$(echo "$item_rc1" | tr -d ' ')
+    item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
-      echo ""
-      mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
-      result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      echo "Firmware_1 на mtd$result разделе, обновляю..."
-      dd if=$Firmware of=/dev/mtdblock$result
-      wait
-      echo ""
-      mtdSlot2="$(grep -w '/proc/mtd' -e 'Firmware_2')"
-      result2=$(echo "$mtdSlot2" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      echo "Firmware_2 на mtd$result2 разделе, обновляю..."
-      dd if=$Firmware of=/dev/mtdblock$result2
-      successful_message "Прошивка успешно обновлена"
+      update_firmware_block $Firmware
       ;;
     esac
   fi
-  rm $FILE
+  rm $Firmware
   read -p "Перезагрузить роутер? (y/n) " item_rc1
-  item_rc1=$(echo "$item_rc1" | tr -d ' ')
+  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
     echo ""
@@ -231,11 +216,20 @@ ota_update() {
 
 update_firmware_block() {
   local firmware=$1
-  local mtdblock=$2
-
-  echo "Firmware на mtd${mtdblock} разделе, обновляю..."
-  dd if=$firmware of=/dev/mtdblock$mtdblock
-  wait
+  echo ""
+  for partition in Firmware Firmware_1 Firmware_2; do
+    mtdSlot="$(grep -w '/proc/mtd' -e $partition)"
+    if [ -z "$mtdSlot" ]; then
+      sleep 1
+    else
+      result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+      echo "$partition на mtd${result} разделе, обновляю..."
+      dd if=$firmware of=/dev/mtdblock$result
+      wait
+      echo ""
+    fi
+  done
+  successful_message "Прошивка успешно обновлена"
 }
 
 firmware_manual_update() {
@@ -247,8 +241,6 @@ firmware_manual_update() {
   if [ -z "$files" ]; then
     echo ""
     exception_error "Файл обновления не найден"
-    echo "Возврат в главное меню..."
-    sleep 2
     main_menu
   fi
   echo ""
@@ -256,7 +248,7 @@ firmware_manual_update() {
   echo ""
   printf "${CYAN}00 - Выход в главное меню${NC}\n"
   read -p "Выберите файл обновления (от 1 до $count): " choice
-  choice=$(echo "$choice" | tr -d ' ')
+  choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
@@ -271,22 +263,13 @@ firmware_manual_update() {
   echo ""
   printf "${GREEN}"
   read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
-  item_rc1=$(echo "$item_rc1" | tr -d ' ')
+  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   printf "${NC}"
   case "$item_rc1" in
   y | Y)
-    echo ""
-    mtdSlot="$(grep -w '/proc/mtd' -e 'Firmware_1')"
-    result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-    update_firmware_block $Firmware $result
-    echo ""
-    mtdSlot2="$(grep -w '/proc/mtd' -e 'Firmware_2')"
-    result2=$(echo "$mtdSlot2" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-    update_firmware_block $Firmware $result2
-    echo ""
-    successful_message "Прошивка успешно обновлена"
+    update_firmware_block $Firmware
     read -p "Удалить файл обновления? (y/n) " item_rc2
-    item_rc2=$(echo "$item_rc2" | tr -d ' ')
+    item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
     case "$item_rc2" in
     y | Y)
       rm $Firmware
@@ -300,7 +283,7 @@ firmware_manual_update() {
     esac
 
     read -p "Перезагрузить роутер? (y/n) " item_rc3
-    item_rc3=$(echo "$item_rc3" | tr -d ' ')
+    item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
     case "$item_rc3" in
     y | Y)
       echo ""
@@ -335,7 +318,7 @@ backup_block() {
   echo -e "\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
-  choice=$(echo "$choice" | tr -d ' ')
+  choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
@@ -358,7 +341,7 @@ backup_block() {
   echo ""
   successful_message "Раздел успешно сохранён в $folder_path"
   echo "Возврат в главное меню..."
-  sleep 4
+  sleep 2
   main_menu
 }
 
@@ -367,15 +350,17 @@ backup_entware() {
   identify_external_drive
   echo ""
   echo "Выполняю копирование..."
-  backup_output=$(tar cvzf "$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz" -C /opt . 2>&1)
-  if echo "$backup_output" | grep -q "error"; then
-    exception_error
-  fi
+  backup_file="$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
+  backup_output=$(tar cvzf "$backup_file" -C /opt . 2>&1)
   wait
-  echo ""
-  successful_message "Бекап успешно скопирован в $backup_output"
+  if echo "$backup_output" | grep -q "No space left on device"; then
+    exception_error "Бекап не выполнен, проверьте свободное место"
+  else
+    echo ""
+    successful_message "Бекап успешно скопирован в $backup_file"
+  fi
   echo "Возврат в главное меню..."
-  sleep 3
+  sleep 2
   main_menu
 }
 
@@ -398,7 +383,7 @@ rewrite_block() {
   printf "${CYAN}00 - Выход в главное меню${NC}\n"
   echo ""
   read -p "Выберите файл для замены: " choice
-  choice=$(echo "$choice" | tr -d ' ')
+  choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
@@ -419,60 +404,39 @@ rewrite_block() {
   printf "${GREEN}Выбран $mtdName для замены${NC}\n"
   printf "${RED}Внимание, загрузчик не перезаписывается!${NC}\n"
   read -p "Выберите, какой раздел перезаписать (например для mtd2 это 2): " choice
-  choice=$(echo "$choice" | tr -d ' ')
+  choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
   selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
   echo ""
   read -r -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
-  item_rc1=$(echo "$item_rc1" | tr -d ' ')
+  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
     sleep 2
     echo ""
     dd if=$mtdFile of=/dev/mtdblock$choice
     wait
-    second_mtd=$(echo "$output" | grep -v "^mtd$choice" | awk -v name=$selected_mtd 'BEGIN{IGNORECASE=1} $0 ~ name {print substr($0, index($0,$4)); exit}' | grep -oP '(?<=\").*(?=\")')
-    if [ -n "$second_mtd" ]; then
+    echo ""
+    successful_message "Раздел успешно перезаписан"
+    printf "${NC}"
+    read -r -p "Перезагрузить роутер? (y/n) " item_rc3
+    item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
+    case "$item_rc3" in
+    y | Y)
       echo ""
-      printf "${CYAN}"
-      read -r -p "Обнаружен второй раздел $second_mtd, также перезаписать? (y/n) " item_rc2
-      item_rc2=$(echo "$item_rc2" | tr -d ' ')
-      printf "${NC}"
-      case "$item_rc2" in
-      y | Y)
-        second_choice=$(echo "$output" | awk -v name=$second_mtd 'BEGIN{IGNORECASE=1} $0 ~ name {print substr($1, 4)}')
-        sleep 2
-        echo ""
-        dd if=$mtdFile of=/dev/mtdblock$second_choice
-        wait
-        ;;
-      n | N)
-        echo ""
-        ;;
-      *) ;;
-      esac
-    fi
+      reboot
+      ;;
+    n | N)
+      echo ""
+      ;;
+    *) ;;
+    esac
     ;;
   n | N)
     echo ""
     ;;
-  esac
-  echo ""
-  successful_message "Раздел успешно перезаписан"
-  printf "${NC}"
-  read -r -p "Перезагрузить роутер? (y/n) " item_rc3
-  item_rc3=$(echo "$item_rc3" | tr -d ' ')
-  case "$item_rc3" in
-  y | Y)
-    echo ""
-    reboot
-    ;;
-  n | N)
-    echo ""
-    ;;
-  *) ;;
   esac
   echo "Возврат в главное меню..."
   sleep 1
