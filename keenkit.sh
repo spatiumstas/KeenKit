@@ -126,7 +126,6 @@ script_update() {
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "/opt/$SCRIPT"
     chmod +x /opt/$SCRIPT
-    echo ""
     successful_message "Скрипт успешно обновлён"
   else
     exception_error "Ошибка при скачивании скрипта"
@@ -261,8 +260,9 @@ firmware_manual_update() {
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
-    echo ""
     exception_error "Файл обновления не найден"
+    echo "Возврат в главное меню..."
+    sleep 1
     main_menu
   fi
   echo ""
@@ -360,7 +360,6 @@ backup_block() {
     dd if="/dev/mtd$choice" of="$folder_path/mtd$choice.$selected_mtd.bin"
     wait
   fi
-  echo ""
   successful_message "Раздел успешно сохранён в $folder_path"
   echo "Возврат в главное меню..."
   sleep 2
@@ -378,7 +377,6 @@ backup_entware() {
   if echo "$backup_output" | grep -q "No space left on device"; then
     exception_error "Бэкап не выполнен, проверьте свободное место"
   else
-    echo ""
     successful_message "Бэкап успешно скопирован в $backup_file"
   fi
   echo "Возврат в главное меню..."
@@ -392,7 +390,6 @@ rewrite_block() {
   files=$(find $selected_drive -name '*.bin')
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
-    echo ""
     exception_error "Bin файл не найден в выбранном хранилище"
     echo "Возврат в главное меню..."
     sleep 1
@@ -440,7 +437,6 @@ rewrite_block() {
     echo ""
     dd if=$mtdFile of=/dev/mtdblock$choice
     wait
-    echo ""
     successful_message "Раздел успешно перезаписан"
     printf "${NC}"
     read -r -p "Перезагрузить роутер? (y/n) " item_rc3
