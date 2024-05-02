@@ -7,11 +7,11 @@ USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.1 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.2 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
-  echo "2. Бекап разделов"
-  echo "3. Бекап Entware"
+  echo "2. Бэкап разделов"
+  echo "3. Бэкап Entware"
   echo "4. Заменить раздел"
   echo "5. OTA Update"
   echo ""
@@ -73,17 +73,33 @@ packages_checker() {
 
 identify_external_drive() {
   local message=$1
+  local message2=$2
+  local special_message=$3
   filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
 
   if [ -z "$filtered_output" ]; then
     selected_drive="/opt"
+    if [ "$special_message" = "true" ]; then
+      echo ""
+      read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
+      item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+      case "$item_rc1" in
+      y | Y)
+        echo ""
+        ;;
+      n | N)
+        main_menu
+        ;;
+      *) ;;
+      esac
+    fi
   else
     echo ""
     echo "Доступные накопители:"
-    echo "0. Встроенное хранилище (может не хватить места)"
+    echo "0. Встроенное хранилище $message2"
     echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
     echo ""
-    read -p "Выберите накопитель: " choice
+    read -p "$message " choice
     choice=$(echo "$choice" | tr -d ' \n\r')
 
     if [ "$choice" = "0" ]; then
@@ -133,14 +149,16 @@ ota_update() {
     printf "${CYAN}$i. $DIR${NC}\n"
     i=$((i + 1))
   done
-
+  printf "${CYAN}00. Выход в главное меню\n${NC}"
   echo ""
   read -p "Выберите модель: " DIR_NUM
+  if [ "$DIR_NUM" = "00" ]; then
+    main_menu
+  fi
   DIR_NUM=$(echo "$DIR_NUM" | tr -d ' \n\r')
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
   BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$DIR" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
-
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
   else
@@ -150,9 +168,13 @@ ota_update() {
       printf "${CYAN}$i. $FILE${NC}\n"
       i=$((i + 1))
     done
-
+    printf "${CYAN}00. Выход в главное меню\n${NC}"
     echo ""
     read -p "Выберите прошивку: " FILE_NUM
+
+    if [ "$FILE_NUM" = "00" ]; then
+      main_menu
+    fi
     FILE_NUM=$(echo "$FILE_NUM" | tr -d ' \n\r')
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     echo ""
@@ -307,14 +329,14 @@ firmware_manual_update() {
 
 backup_block() {
   output=$(mount)
-  identify_external_drive "Доступные накопители:"
+  identify_external_drive "Выберите накопитель:"
   filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
   output=$(cat /proc/mtd)
   echo ""
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
   printf "${CYAN}00 - Выход в главное меню\n"
-  printf "99 - Бекап всех разделов${NC}"
+  printf "99 - Бэкап всех разделов${NC}"
   echo -e "\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
@@ -347,17 +369,17 @@ backup_block() {
 
 backup_entware() {
   output=$(mount)
-  identify_external_drive
+  identify_external_drive "Доступные накопители:" "(может не хватить места)" "true"
   echo ""
   echo "Выполняю копирование..."
   backup_file="$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
   backup_output=$(tar cvzf "$backup_file" -C /opt . 2>&1)
   wait
   if echo "$backup_output" | grep -q "No space left on device"; then
-    exception_error "Бекап не выполнен, проверьте свободное место"
+    exception_error "Бэкап не выполнен, проверьте свободное место"
   else
     echo ""
-    successful_message "Бекап успешно скопирован в $backup_file"
+    successful_message "Бэкап успешно скопирован в $backup_file"
   fi
   echo "Возврат в главное меню..."
   sleep 2
@@ -366,7 +388,7 @@ backup_entware() {
 
 rewrite_block() {
   output=$(mount)
-  identify_external_drive
+  identify_external_drive "Выберите накопитель с размещённым файлом:"
   files=$(find $selected_drive -name '*.bin')
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
