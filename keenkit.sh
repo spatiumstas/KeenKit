@@ -192,9 +192,9 @@ ota_update() {
     fi
     curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/md5sum" --output /tmp/md5sum
 
-    MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}')
+    MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}') | tr '[:upper:]' '[:lower:]'
 
-    FILE_MD5SUM=$(md5sum /tmp/$FILE | awk '{print $1}')
+    FILE_MD5SUM=$(md5sum /tmp/$FILE | awk '{print $1}') | tr '[:upper:]' '[:lower:]'
 
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
