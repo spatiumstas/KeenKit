@@ -203,7 +203,8 @@ ota_update() {
       echo "Ожидаемый - $MD5SUM"
       echo "Фактический - $FILE_MD5SUM"
       rm $FILE
-      sleep 2
+      echo "Возврат в главное меню..."
+      sleep 3
       main_menu
     fi
     echo ""
