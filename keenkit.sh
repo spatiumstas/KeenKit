@@ -7,7 +7,7 @@ USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.1 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.2 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бэкап разделов"
@@ -126,6 +126,9 @@ script_update() {
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "/opt/$SCRIPT"
     chmod +x /opt/$SCRIPT
+    cd /opt/bin
+    ln -s /opt/keenkit.sh KeenKit
+    ln -s /opt/keenkit.sh keenkit
     successful_message "Скрипт успешно обновлён"
   else
     exception_error "Ошибка при скачивании скрипта"
