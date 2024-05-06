@@ -119,22 +119,23 @@ script_update() {
   REPO="KeenKit"
   SCRIPT="keenkit.sh"
   TMP_DIR="/tmp"
+  OPT_DIR="/opt"
 
   packages_checker
-  curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/keenkit.sh" --output $TMP_DIR/$SCRIPT
+  curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
-    mv "$TMP_DIR/$SCRIPT" "/opt/$SCRIPT"
-    chmod +x /opt/$SCRIPT
-    cd /opt/bin
-    ln -s /opt/keenkit.sh KeenKit
-    ln -s /opt/keenkit.sh keenkit
+    mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
+    chmod +x $OPT_DIR/$SCRIPT
+    cd $OPT_DIR/bin
+    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
+    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
     successful_message "Скрипт успешно обновлён"
   else
     exception_error "Ошибка при скачивании скрипта"
   fi
   sleep 2
-  /opt/$SCRIPT
+  $OPT_DIR/$SCRIPT
 }
 
 ota_update() {
