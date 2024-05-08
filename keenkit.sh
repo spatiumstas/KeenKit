@@ -134,7 +134,6 @@ script_update() {
   else
     exception_error "Ошибка при скачивании скрипта"
   fi
-  sleep 1
   $OPT_DIR/$SCRIPT
 }
 
