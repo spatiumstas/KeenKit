@@ -7,7 +7,7 @@ USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.2 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.3 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бэкап разделов"
@@ -345,27 +345,43 @@ backup_block() {
   echo -e "\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
+  echo ""
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
   mkdir -p "$folder_path"
+  error_occurred=0
   if [ "$choice" = "99" ]; then
     output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
     for i in $(seq 0 $(($output_all_mtd - 1))); do
       mtd_name=$(echo "$output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
       echo "Копирую mtd$i.$mtd_name.bin..."
-      cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin"
+      backup_log=$(cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin" 2>&1)
+      wait
+      if echo "backup_log" | grep -q "No space left on device"; then
+        error_occurred=1
+        exception_error "Разделы не сохранены, проверьте свободное место"
+      fi
     done
-
+    if [ "$error_occurred" -eq 0 ]; then
+      successful_message "Разделы успешно сохранены в $folder_path"
+    fi
   else
     selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
     echo "Выбран mtd$choice.$selected_mtd.bin, копирую..."
-    echo -e "\n"
-    dd if="/dev/mtd$choice" of="$folder_path/mtd$choice.$selected_mtd.bin"
+    sleep 1
+    backup_log=$(dd if="/dev/mtd$choice" of="$folder_path/mtd$choice.$selected_mtd.bin" 2>&1)
     wait
+    if echo "backup_log" | grep -q "No space left on device"; then
+      error_occurred=1
+      exception_error "Раздел не сохранён, проверьте свободное место"
+    fi
+    echo ""
+    if [ "$error_occurred" -eq 0 ]; then
+      successful_message "Раздел успешно сохранён в $folder_path"
+    fi
   fi
-  successful_message "Раздел успешно сохранён в $folder_path"
   echo "Возврат в главное меню..."
   sleep 2
   main_menu
@@ -438,11 +454,15 @@ rewrite_block() {
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
-    sleep 2
+    sleep 1
     echo ""
-    dd if=$mtdFile of=/dev/mtdblock$choice
+    rewrite=$(dd if=$mtdFile of=/dev/mtdblock$choice 2>&1)
     wait
-    successful_message "Раздел успешно перезаписан"
+    if echo "$rewrite" | grep -q "No space left on device"; then
+      exception_error "Перезапись не выполнена, записываемый файл больше раздела"
+    else
+      successful_message "Раздел успешно перезаписан"
+    fi
     printf "${NC}"
     read -r -p "Перезагрузить роутер? (y/n) " item_rc3
     item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
