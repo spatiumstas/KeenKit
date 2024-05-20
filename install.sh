@@ -1,4 +1,5 @@
 #!/bin/sh
+### opkg update && opkg install curl && curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/install.sh" -o install.sh && sh install.sh ###
 
 REPO="KeenKit"
 SCRIPT="keenkit.sh"
