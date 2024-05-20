@@ -22,6 +22,7 @@ main_menu() {
   choice=$(echo "$choice" | tr -d ' \n\r')
 
   case "$choice" in
+  '') main_menu ;;
   1) firmware_manual_update ;;
   2) backup_block ;;
   3) backup_entware ;;
@@ -30,7 +31,6 @@ main_menu() {
   99) script_update ;;
   00) exit ;;
   *)
-    echo "Вы ввели: '$choice'"
     echo "Неверный выбор. Попробуйте снова."
     sleep 1
     main_menu
