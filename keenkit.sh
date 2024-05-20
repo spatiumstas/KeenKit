@@ -30,6 +30,7 @@ main_menu() {
   99) script_update ;;
   00) exit ;;
   *)
+    echo "Вы ввели: '$choice'"
     echo "Неверный выбор. Попробуйте снова."
     sleep 1
     main_menu
