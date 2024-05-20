@@ -7,7 +7,7 @@ USER="spatiumstas"
 
 main_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.3 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.4 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бэкап разделов"
@@ -19,23 +19,27 @@ main_menu() {
   echo "99. Обновить скрипт"
   echo ""
   read -p "Выберите действие: " choice
-  choice=$(echo "$choice" | tr -d ' \n\r')
 
-  case "$choice" in
-  '') main_menu ;;
-  1) firmware_manual_update ;;
-  2) backup_block ;;
-  3) backup_entware ;;
-  4) rewrite_block ;;
-  5) ota_update ;;
-  99) script_update ;;
-  00) exit ;;
-  *)
-    echo "Неверный выбор. Попробуйте снова."
-    sleep 1
+  if [ -z "$choice" ]; then
     main_menu
-    ;;
-  esac
+  else
+    choice=$(echo "$choice" | tr -d ' \n\r')
+
+    case "$choice" in
+    1) firmware_manual_update ;;
+    2) backup_block ;;
+    3) backup_entware ;;
+    4) rewrite_block ;;
+    5) ota_update ;;
+    99) script_update ;;
+    00) exit ;;
+    *)
+      echo "Неверный выбор. Попробуйте снова."
+      sleep 1
+      main_menu
+      ;;
+    esac
+  fi
 }
 
 exception_error() {
@@ -265,7 +269,7 @@ firmware_manual_update() {
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
-    exception_error "Файл обновления не найден"
+    exception_error "Файл обновления не найден на накопителе."
     echo "Возврат в главное меню..."
     sleep 1
     main_menu
