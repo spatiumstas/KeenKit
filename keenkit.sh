@@ -276,8 +276,8 @@ firmware_manual_update() {
   fi
   echo ""
   echo "$files" | awk '{print NR".", substr($0, 6)}'
+  printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
-  printf "${CYAN}00 - Выход в главное меню${NC}\n"
   read -p "Выберите файл обновления (от 1 до $count): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -344,8 +344,8 @@ backup_block() {
   echo ""
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
-  printf "${CYAN}00 - Выход в главное меню\n"
-  printf "99 - Бэкап всех разделов${NC}"
+  printf "${CYAN}00. Выход в главное меню\n"
+  printf "99. Бэкап всех разделов${NC}"
   echo -e "\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
@@ -424,7 +424,7 @@ rewrite_block() {
   echo "Доступные файлы:"
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   echo ""
-  printf "${CYAN}00 - Выход в главное меню${NC}\n"
+  printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
   read -p "Выберите файл для замены: " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
@@ -443,7 +443,7 @@ rewrite_block() {
   output=$(cat /proc/mtd)
   echo "$output" | awk 'NR>1 {print $0}'
   echo ""
-  printf "${CYAN}00 - Выход в главное меню${NC}\n"
+  printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
   printf "${GREEN}Выбран $mtdName для замены${NC}\n"
   printf "${RED}Внимание, загрузчик не перезаписывается!${NC}\n"
