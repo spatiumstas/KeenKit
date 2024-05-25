@@ -5,9 +5,9 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
 
-main_menu() {
+print_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.4 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.5 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку"
   echo "2. Бэкап разделов"
@@ -18,6 +18,10 @@ main_menu() {
   echo "00. Выход"
   echo "99. Обновить скрипт"
   echo ""
+}
+
+main_menu() {
+  print_menu
   read -p "Выберите действие: " choice
 
   if [ -z "$choice" ]; then
@@ -42,31 +46,20 @@ main_menu() {
   fi
 }
 
-exception_error() {
+print_message() {
   local message=$1
+  local color=$2
   local len=${#message}
   local border=$(printf '%0.s-' $(seq 1 $((len + 2))))
 
-  printf "${RED}"
-  echo -e "\n+${border}+"
-  echo -e "| ${message} |"
-  echo -e "+${border}+\n"
-  printf "${NC}"
-  sleep 2
-}
-
-successful_message() {
-  local message=$1
-  local len=${#message}
-  local border=$(printf '%0.s-' $(seq 1 $((len + 2))))
-
-  printf "${GREEN}"
+  printf "${color}\n"
   echo -e "\n+${border}+"
   echo -e "| ${message} |"
   echo -e "+${border}+\n"
   printf "${NC}"
   sleep 1
 }
+
 packages_checker() {
   if ! opkg list-installed | grep -q "^curl"; then
     printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
@@ -135,9 +128,9 @@ script_update() {
     cd $OPT_DIR/bin
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
-    successful_message "Скрипт успешно обновлён"
+    print_message "Скрипт успешно обновлён" "$GREEN"
   else
-    exception_error "Ошибка при скачивании скрипта"
+    print_message "Ошибка при скачивании скрипта" "$RED"
   fi
   $OPT_DIR/$SCRIPT
 }
@@ -187,7 +180,7 @@ ota_update() {
     echo ""
     echo "Загружаю прошивку..."
     if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/$FILE" --output /tmp/$FILE; then
-      exception_error "}Не удалось загрузить файл $FILE"
+      print_message "}Не удалось загрузить файл $FILE" "$RED"
       exit 1
     fi
     echo ""
@@ -207,7 +200,7 @@ ota_update() {
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
     else
-      exception_error "MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ"
+      print_message "MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ" "$RED"
       echo "Ожидаемый - $MD5SUM"
       echo "Фактический - $FILE_MD5SUM"
       rm $FILE
@@ -259,7 +252,7 @@ update_firmware_block() {
       echo ""
     fi
   done
-  successful_message "Прошивка успешно обновлена"
+  print_message "Прошивка успешно обновлена" "$GREEN"
 }
 
 firmware_manual_update() {
@@ -269,15 +262,15 @@ firmware_manual_update() {
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
-    exception_error "Файл обновления не найден на накопителе."
+    print_message "Файл обновления не найден на накопителе." "$RED"
     echo "Возврат в главное меню..."
     sleep 1
     main_menu
   fi
   echo ""
   echo "$files" | awk '{print NR".", substr($0, 6)}'
+  printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
-  printf "${CYAN}00 - Выход в главное меню${NC}\n"
   read -p "Выберите файл обновления (от 1 до $count): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -344,8 +337,8 @@ backup_block() {
   echo ""
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
-  printf "${CYAN}00 - Выход в главное меню\n"
-  printf "99 - Бэкап всех разделов${NC}"
+  printf "${CYAN}00. Выход в главное меню\n"
+  printf "99. Бэкап всех разделов${NC}"
   echo -e "\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
@@ -365,11 +358,11 @@ backup_block() {
       wait
       if echo "backup_log" | grep -q "No space left on device"; then
         error_occurred=1
-        exception_error "Разделы не сохранены, проверьте свободное место"
+        print_message "Разделы не сохранены, проверьте свободное место" "$RED"
       fi
     done
     if [ "$error_occurred" -eq 0 ]; then
-      successful_message "Разделы успешно сохранены в $folder_path"
+      print_message "Разделы успешно сохранены в $folder_path" "$GREEN"
     fi
   else
     selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
@@ -379,11 +372,10 @@ backup_block() {
     wait
     if echo "backup_log" | grep -q "No space left on device"; then
       error_occurred=1
-      exception_error "Раздел не сохранён, проверьте свободное место"
+      print_message "Раздел не сохранён, проверьте свободное место" "$RED"
     fi
-    echo ""
     if [ "$error_occurred" -eq 0 ]; then
-      successful_message "Раздел успешно сохранён в $folder_path"
+      print_message "Раздел успешно сохранён в $folder_path" "$GREEN"
     fi
   fi
   echo "Возврат в главное меню..."
@@ -400,9 +392,9 @@ backup_entware() {
   backup_output=$(tar cvzf "$backup_file" -C /opt . 2>&1)
   wait
   if echo "$backup_output" | grep -q "No space left on device"; then
-    exception_error "Бэкап не выполнен, проверьте свободное место"
+    print_message "Бэкап не выполнен, проверьте свободное место" "$RED"
   else
-    successful_message "Бэкап успешно скопирован в $backup_file"
+    print_message "Бэкап успешно скопирован в $backup_file" "$GREEN"
   fi
   echo "Возврат в главное меню..."
   sleep 2
@@ -415,7 +407,7 @@ rewrite_block() {
   files=$(find $selected_drive -name '*.bin')
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
-    exception_error "Bin файл не найден в выбранном хранилище"
+    print_message "Bin файл не найден в выбранном хранилище" "$RED"
     echo "Возврат в главное меню..."
     sleep 1
     main_menu
@@ -424,7 +416,7 @@ rewrite_block() {
   echo "Доступные файлы:"
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   echo ""
-  printf "${CYAN}00 - Выход в главное меню${NC}\n"
+  printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
   read -p "Выберите файл для замены: " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
@@ -443,7 +435,7 @@ rewrite_block() {
   output=$(cat /proc/mtd)
   echo "$output" | awk 'NR>1 {print $0}'
   echo ""
-  printf "${CYAN}00 - Выход в главное меню${NC}\n"
+  printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
   printf "${GREEN}Выбран $mtdName для замены${NC}\n"
   printf "${RED}Внимание, загрузчик не перезаписывается!${NC}\n"
@@ -463,9 +455,9 @@ rewrite_block() {
     rewrite=$(dd if=$mtdFile of=/dev/mtdblock$choice 2>&1)
     wait
     if echo "$rewrite" | grep -q "No space left on device"; then
-      exception_error "Перезапись не выполнена, записываемый файл больше раздела"
+      print_message "Перезапись не выполнена, записываемый файл больше раздела" "$RED"
     else
-      successful_message "Раздел успешно перезаписан"
+      print_message "Раздел успешно перезаписан" "$GREEN"
     fi
     printf "${NC}"
     read -r -p "Перезагрузить роутер? (y/n) " item_rc3
