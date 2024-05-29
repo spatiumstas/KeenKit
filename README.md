@@ -1,3 +1,5 @@
+[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif)](https://www.donationalerts.com/r/spatiumstas)
+
 # Установка
 1. Через Telnet/SSH попасть в установленный Entware
 ```   
@@ -9,8 +11,6 @@ opkg update && opkg install curl && curl -L -s "https://raw.githubusercontent.co
 ```
 Запуск через:
 >keenkit, KeenKit или /opt/keenkit.sh
-
-[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif)](https://www.donationalerts.com/r/spatiumstas)
 
 #  Описание команд
 - ## **Обновить прошивку**
