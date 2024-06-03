@@ -7,9 +7,9 @@ USER="spatiumstas"
 
 print_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.5 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.6 by $USER${NC}\n"
   echo ""
-  echo "1. Обновить прошивку"
+  echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
   echo "3. Бэкап Entware"
   echo "4. Заменить раздел"
@@ -158,7 +158,7 @@ ota_update() {
   DIR_NUM=$(echo "$DIR_NUM" | tr -d ' \n\r')
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
-  BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$DIR" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
+  BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
   else
@@ -179,8 +179,8 @@ ota_update() {
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     echo ""
     echo "Загружаю прошивку..."
-    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/$FILE" --output /tmp/$FILE; then
-      print_message "}Не удалось загрузить файл $FILE" "$RED"
+    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/tmp/$FILE"; then
+      print_message "Не удалось загрузить файл $FILE" "$RED"
       exit 1
     fi
     echo ""
@@ -191,11 +191,11 @@ ota_update() {
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
       exit 1
     fi
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$DIR/md5sum" --output /tmp/md5sum
+    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
 
-    MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}') | tr '[:upper:]' '[:lower:]'
+    MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
-    FILE_MD5SUM=$(md5sum /tmp/$FILE | awk '{print $1}') | tr '[:upper:]' '[:lower:]'
+    FILE_MD5SUM=$(md5sum "/tmp/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
@@ -203,9 +203,9 @@ ota_update() {
       print_message "MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ" "$RED"
       echo "Ожидаемый - $MD5SUM"
       echo "Фактический - $FILE_MD5SUM"
-      rm $FILE
-      echo "Возврат в главное меню..."
-      sleep 3
+      rm "/tmp/$FILE"
+      echo ""
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
     fi
     echo ""
@@ -215,11 +215,11 @@ ota_update() {
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
-      update_firmware_block $Firmware
+      update_firmware_block "$Firmware"
       ;;
     esac
   fi
-  rm $Firmware
+  rm "$Firmware"
   read -p "Перезагрузить роутер? (y/n) " item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
@@ -263,8 +263,8 @@ firmware_manual_update() {
 
   if [ -z "$files" ]; then
     print_message "Файл обновления не найден на накопителе." "$RED"
-    echo "Возврат в главное меню..."
-    sleep 1
+    echo ""
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
   echo ""
@@ -359,10 +359,14 @@ backup_block() {
       if echo "backup_log" | grep -q "No space left on device"; then
         error_occurred=1
         print_message "Разделы не сохранены, проверьте свободное место" "$RED"
+        echo ""
+        read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       fi
     done
     if [ "$error_occurred" -eq 0 ]; then
       print_message "Разделы успешно сохранены в $folder_path" "$GREEN"
+      echo "Возврат в главное меню..."
+      sleep 2
     fi
   else
     selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
@@ -373,13 +377,15 @@ backup_block() {
     if echo "backup_log" | grep -q "No space left on device"; then
       error_occurred=1
       print_message "Раздел не сохранён, проверьте свободное место" "$RED"
+      echo ""
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     fi
     if [ "$error_occurred" -eq 0 ]; then
       print_message "Раздел успешно сохранён в $folder_path" "$GREEN"
+      echo "Возврат в главное меню..."
+      sleep 2
     fi
   fi
-  echo "Возврат в главное меню..."
-  sleep 2
   main_menu
 }
 
@@ -393,11 +399,13 @@ backup_entware() {
   wait
   if echo "$backup_output" | grep -q "No space left on device"; then
     print_message "Бэкап не выполнен, проверьте свободное место" "$RED"
+    echo ""
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   else
     print_message "Бэкап успешно скопирован в $backup_file" "$GREEN"
+    echo "Возврат в главное меню..."
+    sleep 2
   fi
-  echo "Возврат в главное меню..."
-  sleep 2
   main_menu
 }
 
@@ -408,8 +416,8 @@ rewrite_block() {
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
     print_message "Bin файл не найден в выбранном хранилище" "$RED"
-    echo "Возврат в главное меню..."
-    sleep 1
+    echo ""
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
   echo ""
