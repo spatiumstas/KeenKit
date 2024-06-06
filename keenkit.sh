@@ -83,7 +83,6 @@ identify_external_drive() {
       item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
       case "$item_rc1" in
       y | Y)
-        echo ""
         ;;
       n | N)
         main_menu
