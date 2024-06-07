@@ -7,7 +7,7 @@ USER="spatiumstas"
 
 print_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.6 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v1.6.7 by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
