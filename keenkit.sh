@@ -237,16 +237,16 @@ ota_update() {
 }
 
 update_firmware_block() {
-  local firmware=$1
+  local firmware="$1"
   echo ""
   for partition in Firmware Firmware_1 Firmware_2; do
-    mtdSlot="$(grep -w '/proc/mtd' -e $partition)"
+    mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
     if [ -z "$mtdSlot" ]; then
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      echo "$partition на mtd${result} разделе, обновляю..."
-      dd if=$firmware of=/dev/mtdblock$result
+      echo "Раздел $partition на mtd${result} разделе, обновляю..."
+      dd if="$firmware" of="/dev/mtdblock$result"
       wait
       echo ""
     fi
@@ -257,7 +257,7 @@ update_firmware_block() {
 firmware_manual_update() {
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
-  files=$(find $selected_drive -name '*.bin' -size +10M)
+  files=$(find "$selected_drive" -name '*.bin' -size +10M)
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
@@ -275,7 +275,7 @@ firmware_manual_update() {
   if [ "$choice" = "00" ]; then
     main_menu
   fi
-  if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
+  if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
     echo "Неверный выбор файла"
     sleep 2
     main_menu
@@ -290,12 +290,12 @@ firmware_manual_update() {
   printf "${NC}"
   case "$item_rc1" in
   y | Y)
-    update_firmware_block $Firmware
+    update_firmware_block "$Firmware"
     read -p "Удалить файл обновления? (y/n) " item_rc2
     item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
     case "$item_rc2" in
     y | Y)
-      rm $Firmware
+      rm "$Firmware"
       wait
       sleep 2
       ;;
