@@ -4,10 +4,11 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
+VERSION="1.6.8"
 
 print_menu() {
   printf "\033c"
-  printf "${CYAN}KeenKit v1.6.7 by $USER${NC}\n"
+  printf "${CYAN}KeenKit v$VERSION by $USER${NC}\n"
   echo ""
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
@@ -82,8 +83,8 @@ identify_external_drive() {
       read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
       item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
       case "$item_rc1" in
-      y | Y)
-        ;;
+      y | Y) ;;
+
       n | N)
         main_menu
         ;;
@@ -119,7 +120,7 @@ script_update() {
   OPT_DIR="/opt"
 
   packages_checker
-  curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
+  curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
@@ -128,6 +129,9 @@ script_update() {
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
     print_message "Скрипт успешно обновлён" "$GREEN"
+    URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
+    JSON_DATA="{\"script_update\": \"$VERSION\"}"
+    curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   else
     print_message "Ошибка при скачивании скрипта" "$RED"
   fi
@@ -198,6 +202,9 @@ ota_update() {
 
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
+      URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
+      JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$VERSION\"}"
+      curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
     else
       print_message "MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ" "$RED"
       echo "Ожидаемый - $MD5SUM"
