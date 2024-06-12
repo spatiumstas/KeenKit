@@ -184,7 +184,8 @@ ota_update() {
     echo "Загружаю прошивку..."
     if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/tmp/$FILE"; then
       print_message "Не удалось загрузить файл $FILE" "$RED"
-      exit 1
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+      main_menu
     fi
     echo ""
 
@@ -192,7 +193,8 @@ ota_update() {
       printf "${GREEN}Файл $FILE успешно загружен.${NC}\n"
     else
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
-      exit 1
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+      main_menu
     fi
     curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
 
