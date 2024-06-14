@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.6.8"
+VERSION="1.6.9"
 
 print_menu() {
   printf "\033c"
@@ -184,7 +184,8 @@ ota_update() {
     echo "Загружаю прошивку..."
     if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/tmp/$FILE"; then
       print_message "Не удалось загрузить файл $FILE" "$RED"
-      exit 1
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+      main_menu
     fi
     echo ""
 
@@ -192,7 +193,8 @@ ota_update() {
       printf "${GREEN}Файл $FILE успешно загружен.${NC}\n"
     else
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
-      exit 1
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+      main_menu
     fi
     curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
 
@@ -252,7 +254,7 @@ update_firmware_block() {
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      echo "Раздел $partition на mtd${result} разделе, обновляю..."
+      echo "$partition на mtd${result} разделе, обновляю..."
       dd if="$firmware" of="/dev/mtdblock$result"
       wait
       echo ""
