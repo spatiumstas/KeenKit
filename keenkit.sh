@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.6.9"
+VERSION="1.7"
 
 print_menu() {
   printf "\033c"
@@ -47,6 +47,46 @@ main_menu() {
   fi
 }
 
+get_boot_partition() {
+  local OFFSET="0x60000"
+  local AUTOBOOT="0x8140000 0x180000 0x4140000"
+  local LENGTH=200
+  local decimal_offset=$(printf "%d" "$OFFSET")
+  local end_offset=$(printf "0x%X" $((decimal_offset + LENGTH)))
+  local BIN_FILE=$(get_breed_boot)
+  local hex_data=$(xxd -s "$OFFSET" -l "$LENGTH" "$BIN_FILE")
+  local ascii_data=$(echo "$hex_data" | xxd -r -p | strings)
+  local found_8140000=0
+  local found_180000=0
+  local found_4140000=0
+  local firmwareSlot=""
+
+  for target_value in $AUTOBOOT; do
+    if echo "$ascii_data" | grep -qF "$target_value"; then
+      case "$target_value" in
+      "0x8140000") found_8140000=1 ;;
+      "0x180000") found_180000=1 ;;
+      "0x4140000") found_4140000=1 ;;
+      esac
+    fi
+  done
+
+  if [ "$found_180000" -eq 1 ]; then
+    firmwareSlot="1"
+  elif [ "$found_8140000" -eq 1 ] || [ "$found_4140000" -eq 1 ]; then
+    firmwareSlot="2"
+  else
+    firmwareSlot=""
+  fi
+  echo "$firmwareSlot"
+}
+
+get_breed_boot() {
+  dd if="/dev/mtdblock0" of="/tmp/breed.bin" >/dev/null 2>&1
+  wait
+  echo "/tmp/breed.bin"
+}
+
 print_message() {
   local message=$1
   local color=$2
@@ -67,6 +107,12 @@ packages_checker() {
     echo ""
     opkg update
     opkg install curl
+  fi
+  if ! opkg list-installed | grep -q "^xxd"; then
+    printf "${RED}Пакет xxd не найден, устанавливаем...${NC}\n"
+    echo ""
+    opkg update
+    opkg install xxd
   fi
 }
 
@@ -139,8 +185,8 @@ script_update() {
 }
 
 ota_update() {
+  slot=$(get_boot_partition)
   REPO="osvault"
-
   packages_checker
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
 
@@ -199,7 +245,6 @@ ota_update() {
     curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
 
     MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-
     FILE_MD5SUM=$(md5sum "/tmp/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
@@ -223,7 +268,7 @@ ota_update() {
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
-      update_firmware_block "$Firmware"
+      update_firmware_block "$Firmware" "$slot"
       ;;
     esac
   fi
@@ -247,19 +292,42 @@ ota_update() {
 
 update_firmware_block() {
   local firmware="$1"
+  local firmwareSlotOTA="$2"
+  firmwareSlot=$(get_boot_partition)
   echo ""
-  for partition in Firmware Firmware_1 Firmware_2; do
-    mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
-    if [ -z "$mtdSlot" ]; then
-      sleep 1
-    else
-      result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      echo "$partition на mtd${result} разделе, обновляю..."
-      dd if="$firmware" of="/dev/mtdblock$result"
-      wait
-      echo ""
-    fi
-  done
+  if [ "$firmwareSlot" = "1" ] || [ "$firmwareSlotOTA" = "1" ]; then
+    printf "${CYAN}"
+    echo "Загрузочный слот - 1"
+    printf "${NC}"
+    for partition in Firmware_2 Firmware_1 Firmware; do
+      mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
+      if [ -z "$mtdSlot" ]; then
+        sleep 1
+      else
+        result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+        echo "$partition на mtd${result} разделе, обновляю..."
+        dd if="$firmware" of="/dev/mtdblock$result"
+        wait
+        echo ""
+      fi
+    done
+  else
+    printf "${CYAN}"
+    echo "Загрузочный слот - 2"
+    printf "${NC}"
+    for partition in Firmware_1 Firmware_2 Firmware; do
+      mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
+      if [ -z "$mtdSlot" ]; then
+        sleep 1
+      else
+        result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+        echo "$partition на mtd${result} разделе, обновляю..."
+        dd if="$firmware" of="/dev/mtdblock$result"
+        wait
+        echo ""
+      fi
+    done
+  fi
   print_message "Прошивка успешно обновлена" "$GREEN"
 }
 
@@ -293,10 +361,8 @@ firmware_manual_update() {
   Firmware=$(echo "$files" | awk "NR==$choice")
   FirmwareName=$(basename "$Firmware")
   echo ""
-  printf "${GREEN}"
   read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-  printf "${NC}"
   case "$item_rc1" in
   y | Y)
     update_firmware_block "$Firmware"
