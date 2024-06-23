@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.7"
+VERSION="1.7.1"
 
 print_menu() {
   printf "\033c"
@@ -228,14 +228,16 @@ ota_update() {
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     echo ""
     echo "Загружаю прошивку..."
-    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/tmp/$FILE"; then
+    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/opt/$FILE"; then
       print_message "Не удалось загрузить файл $FILE" "$RED"
+      print_message "Убедитесь что в Entware свободно более 30МБ" "$RED"
+      rm "/opt/$FILE"
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
     fi
     echo ""
 
-    if [ -f "/tmp/$FILE" ]; then
+    if [ -f "/opt/$FILE" ]; then
       printf "${GREEN}Файл $FILE успешно загружен.${NC}\n"
     else
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
@@ -245,7 +247,7 @@ ota_update() {
     curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
 
     MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-    FILE_MD5SUM=$(md5sum "/tmp/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    FILE_MD5SUM=$(md5sum "/opt/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
@@ -253,16 +255,17 @@ ota_update() {
       JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$VERSION\"}"
       curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
     else
-      print_message "MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ" "$RED"
+      print_message "MD5 хеш не совпадает" "$RED"
+      print_message "Убедитесь что в Entware свободно более 30МБ" "$RED"
       echo "Ожидаемый - $MD5SUM"
       echo "Фактический - $FILE_MD5SUM"
-      rm "/tmp/$FILE"
+      rm "/opt/$FILE"
       echo ""
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
     fi
     echo ""
-    Firmware="/tmp/$FILE"
+    Firmware="/opt/$FILE"
     FirmwareName=$(basename "$Firmware")
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
