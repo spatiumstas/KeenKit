@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.7"
+VERSION="1.7.2"
 
 print_menu() {
   printf "\033c"
@@ -306,7 +306,7 @@ update_firmware_block() {
       else
         result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
         echo "$partition на mtd${result} разделе, обновляю..."
-        dd if="$firmware" of="/dev/mtdblock$result"
+        dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
         wait
         echo ""
       fi
@@ -322,7 +322,7 @@ update_firmware_block() {
       else
         result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
         echo "$partition на mtd${result} разделе, обновляю..."
-        dd if="$firmware" of="/dev/mtdblock$result"
+        dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
         wait
         echo ""
       fi
