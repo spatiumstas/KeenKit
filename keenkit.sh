@@ -174,6 +174,8 @@ script_update() {
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
     chmod +x $OPT_DIR/$SCRIPT
+    rm -f "$BIN_DIR/KeenKit"
+    rm -f "$BIN_DIR/keenkit"
     ln -sf $OPT_DIR/$SCRIPT opt/bin/KeenKit
     ln -sf $OPT_DIR/$SCRIPT opt/bin/keenkit
     print_message "Скрипт успешно обновлён" "$GREEN"
