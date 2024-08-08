@@ -166,6 +166,7 @@ script_update() {
   SCRIPT="keenkit.sh"
   TMP_DIR="/tmp"
   OPT_DIR="/opt/root/KeenKit"
+  BIN_DIR="/opt/bin"
 
   packages_checker
   mkdir -p "$OPT_DIR"
