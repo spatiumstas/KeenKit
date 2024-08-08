@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.7.2"
+VERSION="1.8"
 
 print_menu() {
   printf "\033c"
@@ -15,6 +15,7 @@ print_menu() {
   echo "3. Бэкап Entware"
   echo "4. Заменить раздел"
   echo "5. OTA Update"
+  echo "6. Заменить сервисные данные (beta)"
   echo ""
   echo "00. Выход"
   echo "99. Обновить скрипт"
@@ -36,6 +37,7 @@ main_menu() {
     3) backup_entware ;;
     4) rewrite_block ;;
     5) ota_update ;;
+    6) service_data_generator ;;
     99) script_update ;;
     00) exit ;;
     *)
@@ -163,25 +165,105 @@ script_update() {
   REPO="KeenKit"
   SCRIPT="keenkit.sh"
   TMP_DIR="/tmp"
-  OPT_DIR="/opt"
+  OPT_DIR="/opt/root/KeenKit"
 
   packages_checker
+  mkdir -p "$OPT_DIR"
   curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
     chmod +x $OPT_DIR/$SCRIPT
-    cd $OPT_DIR/bin
-    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
-    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
+    ln -sf $OPT_DIR/$SCRIPT opt/bin/KeenKit
+    ln -sf $OPT_DIR/$SCRIPT opt/bin/keenkit
     print_message "Скрипт успешно обновлён" "$GREEN"
     URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
     JSON_DATA="{\"script_update\": \"$VERSION\"}"
     curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+    if [ -f /opt/$SCRIPT ]; then
+      rm -f /opt/$SCRIPT
+    fi
   else
     print_message "Ошибка при скачивании скрипта" "$RED"
   fi
   $OPT_DIR/$SCRIPT
+}
+
+service_data_generator() {
+  REPO="KeenKit"
+  OPT_DIR="/opt/root/KeenKit"
+  folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
+  SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
+
+  if ! opkg list-installed | grep -q "^python3"; then
+    read -p "Пакет python3 не установлен, для него необходимо 10МБ свободного места, продолжить? (y/n) " item_rc1
+    item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+    case "$item_rc1" in
+    y | Y)
+      echo ""
+      opkg update
+      opkg install python3-base python3 python3-light libpython3 --nodeps
+      ;;
+    n | N)
+      main_menu
+      return
+      ;;
+    *) ;;
+    esac
+  fi
+
+  if [ ! -f "$SCRIPT_PATH" ]; then
+    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
+    if [ $? -ne 0 ]; then
+      print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
+      return
+    fi
+  fi
+
+  mkdir -p "$folder_path"
+  mtdSlot=$(grep -w 'U-Config' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  if [ -n "$mtdSlot" ]; then
+    dd if="/dev/mtd$mtdSlot" of="$folder_path/U-Config.bin" >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      print_message "Бекап текущего U-Config сохранён в $folder_path" "$GREEN"
+    else
+      print_message "Ошибка при создании бекапа U-Config" "$RED"
+    fi
+  fi
+
+  python3 $SCRIPT_PATH $folder_path/U-Config.bin
+  mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
+  if [ -n "$mtdFile" ]; then
+    print_message "Новые сервисные данные сохранены в $mtdFile" "$GREEN"
+  fi
+  read -p "Продолжить замену? (y/n) " item_rc1
+  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+  case "$item_rc1" in
+  y | Y)
+    echo ""
+    dd if="$mtdFile" of="/dev/mtdblock$mtdSlot"
+    if [ $? -eq 0 ]; then
+      print_message "Замена сервисных данных успешно выполнена" "$GREEN"
+    else
+      print_message "Ошибка при выполнении замены" "$RED"
+    fi
+    ;;
+  esac
+  read -p "Перезагрузить роутер? (y/n) " item_rc2
+  item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
+  case "$item_rc2" in
+  y | Y)
+    echo ""
+    reboot
+    ;;
+  n | N)
+    echo ""
+    ;;
+  *) ;;
+  esac
+  echo "Возврат в главное меню..."
+  sleep 1
+  main_menu
 }
 
 ota_update() {
