@@ -165,27 +165,21 @@ script_update() {
   REPO="KeenKit"
   SCRIPT="keenkit.sh"
   TMP_DIR="/tmp"
-  OPT_DIR="/opt/root/KeenKit"
-  BIN_DIR="/opt/bin"
+  OPT_DIR="/opt"
 
   packages_checker
-  mkdir -p "$OPT_DIR"
   curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
     chmod +x $OPT_DIR/$SCRIPT
-    rm -f "$BIN_DIR/KeenKit"
-    rm -f "$BIN_DIR/keenkit"
-    ln -sf $OPT_DIR/$SCRIPT opt/bin/KeenKit
-    ln -sf $OPT_DIR/$SCRIPT opt/bin/keenkit
+    cd $OPT_DIR/bin
+    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
+    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
     print_message "Скрипт успешно обновлён" "$GREEN"
     URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
     JSON_DATA="{\"script_update\": \"$VERSION\"}"
     curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
-    if [ -f /opt/$SCRIPT ]; then
-      rm -f /opt/$SCRIPT
-    fi
   else
     print_message "Ошибка при скачивании скрипта" "$RED"
   fi
@@ -194,7 +188,7 @@ script_update() {
 
 service_data_generator() {
   REPO="KeenKit"
-  OPT_DIR="/opt/root/KeenKit"
+  OPT_DIR="/opt"
   folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
   SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
 
