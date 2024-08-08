@@ -188,7 +188,7 @@ script_update() {
   else
     print_message "Ошибка при скачивании скрипта" "$RED"
   fi
-  $OPT_DIR/$SCRIPT
+  $OPT_DIR/$SCRIPT script_update
 }
 
 service_data_generator() {
