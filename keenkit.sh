@@ -177,13 +177,17 @@ script_update() {
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
     print_message "Скрипт успешно обновлён" "$GREEN"
-    URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
-    JSON_DATA="{\"script_update\": \"$VERSION\"}"
-    curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+    /bin/sh $OPT_DIR/$SCRIPT post_update
   else
     print_message "Ошибка при скачивании скрипта" "$RED"
   fi
-  $OPT_DIR/$SCRIPT script_update
+}
+
+post_update() {
+  URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
+  JSON_DATA="{\"script_update\": \"$VERSION\"}"
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+  main_menu
 }
 
 service_data_generator() {
@@ -644,4 +648,10 @@ rewrite_block() {
   main_menu
 }
 
-main_menu
+if [ "$1" = "script_update" ]; then
+  script_update
+elif [ "$1" = "post_update" ]; then
+  post_update
+else
+  main_menu
+fi
