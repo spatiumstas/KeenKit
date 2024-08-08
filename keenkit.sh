@@ -193,6 +193,7 @@ service_data_generator() {
   SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
 
   if ! opkg list-installed | grep -q "^python3"; then
+    echo ""
     read -p "Пакет python3 не установлен, для него необходимо 10МБ свободного места, продолжить? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
