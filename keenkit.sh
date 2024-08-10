@@ -177,14 +177,17 @@ script_update() {
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
     print_message "Скрипт успешно обновлён" "$GREEN"
-    /bin/sh $OPT_DIR/$SCRIPT post_update
+    $OPT_DIR/$SCRIPT post_update
   else
     print_message "Ошибка при скачивании скрипта" "$RED"
   fi
 }
 
 post_update() {
-  URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
+  PART1="aHR0cHM6Ly9sb2c"
+  PART2="uc3BhdGl1bS5rZWVuZXRpYy5wcm8="
+  PART3="${PART1}${PART2}"
+  URL=$(echo "$PART3" | base64 -d)
   JSON_DATA="{\"script_update\": \"$VERSION\"}"
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   main_menu
