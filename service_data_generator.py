@@ -49,9 +49,9 @@ def replace_values(filename):
                     new_value = replacements[name]
 
                 data = data[:start] + new_value + data[start + len(new_value):]
-                print(f'Значение {name} было успешно заменено на {new_value.decode("utf-8", errors="ignore")}.')
+                print(f'{name} заменён на {new_value.decode("utf-8", errors="ignore")}')
         else:
-            print(f'Переменная {name} не найдена.')
+            print(f'{name} не найдена.')
 
     if 'servicetag' in replacements:
         servicetag_last_two_bytes = replacements['servicetag'][-4:]

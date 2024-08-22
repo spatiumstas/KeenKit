@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.8"
+VERSION="1.8.1"
 
 print_menu() {
   printf "\033c"
@@ -15,7 +15,7 @@ print_menu() {
   echo "3. Бэкап Entware"
   echo "4. Заменить раздел"
   echo "5. OTA Update"
-  echo "6. Заменить сервисные данные (beta)"
+  echo "6. Заменить сервисные данные"
   echo ""
   echo "00. Выход"
   echo "99. Обновить скрипт"
@@ -227,12 +227,13 @@ service_data_generator() {
 
   mkdir -p "$folder_path"
   mtdSlot=$(grep -w 'U-Config' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  mtdSlot_res=$(grep -w 'U-Config_res' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
   if [ -n "$mtdSlot" ]; then
     dd if="/dev/mtd$mtdSlot" of="$folder_path/U-Config.bin" >/dev/null 2>&1
     if [ $? -eq 0 ]; then
-      print_message "Бекап текущего U-Config сохранён в $folder_path" "$GREEN"
+      print_message "Бэкап текущего U-Config сохранён в $folder_path" "$GREEN"
     else
-      print_message "Ошибка при создании бекапа U-Config" "$RED"
+      print_message "Ошибка при создании бэкапа U-Config" "$RED"
     fi
   fi
 
@@ -247,6 +248,12 @@ service_data_generator() {
   y | Y)
     echo ""
     dd if="$mtdFile" of="/dev/mtdblock$mtdSlot"
+    if [ -n "$mtdSlot_res" ]; then
+    echo ""
+    printf "${CYAN}Найден второй раздел, заменяю...${NC}"
+    echo ""
+    dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
+    fi
     if [ $? -eq 0 ]; then
       print_message "Замена сервисных данных успешно выполнена" "$GREEN"
     else
@@ -502,53 +509,68 @@ backup_block() {
   printf "99. Бэкап всех разделов${NC}"
   echo -e "\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
-  read -p "Выберите цифру раздела (например для mtd2 это 2): " choice
+  read -p "Укажите номер раздела(ов) разделив пробелами: " choice
   echo ""
-  choice=$(echo "$choice" | tr -d ' \n\r')
+  choice=$(echo "$choice" | tr -d '\n\r')
+
   if [ "$choice" = "00" ]; then
     main_menu
   fi
+
   mkdir -p "$folder_path"
   error_occurred=0
+  non_existent_parts=""
+
   if [ "$choice" = "99" ]; then
     output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
     for i in $(seq 0 $(($output_all_mtd - 1))); do
       mtd_name=$(echo "$output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
       echo "Копирую mtd$i.$mtd_name.bin..."
-      backup_log=$(cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin" 2>&1)
-      wait
-      if echo "backup_log" | grep -q "No space left on device"; then
+      if ! cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin"; then
         error_occurred=1
-        print_message "Разделы не сохранены, проверьте свободное место" "$RED"
+        print_message "Ошибка: Недостаточно места для сохранения mtd$i.$mtd_name.bin" "$RED"
         echo ""
         read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+        break
       fi
+      wait
     done
-    if [ "$error_occurred" -eq 0 ]; then
-      print_message "Разделы успешно сохранены в $folder_path" "$GREEN"
-      echo "Возврат в главное меню..."
-      sleep 2
-    fi
   else
-    selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
-    echo "Выбран mtd$choice.$selected_mtd.bin, копирую..."
-    sleep 1
-    backup_log=$(dd if="/dev/mtd$choice" of="$folder_path/mtd$choice.$selected_mtd.bin" 2>&1)
-    wait
-    if echo "backup_log" | grep -q "No space left on device"; then
-      error_occurred=1
-      print_message "Раздел не сохранён, проверьте свободное место" "$RED"
-      echo ""
-      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-    fi
-    if [ "$error_occurred" -eq 0 ]; then
-      print_message "Раздел успешно сохранён в $folder_path" "$GREEN"
-      echo "Возврат в главное меню..."
-      sleep 2
-    fi
+    for part in $choice; do
+      if ! echo "$output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
+        non_existent_parts="$non_existent_parts $part"
+        continue
+      fi
+
+      selected_mtd=$(echo "$output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+      echo "Выбран mtd$part.$selected_mtd.bin, копирую..."
+      sleep 1
+      if ! dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" 2>&1; then
+        error_occurred=1
+        print_message "Ошибка: Недостаточно места для сохранения mtd$part.$selected_mtd.bin" "$RED"
+        echo ""
+        read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+        break
+      fi
+      wait
+    done
   fi
+
+  if [ -n "$non_existent_parts" ]; then
+    print_message "Ошибка: Раздела${non_existent_parts} не существует!" "$RED"
+    error_occurred=1
+  fi
+
+  if [ "$error_occurred" -eq 0 ]; then
+    print_message "Разделы успешно сохранены в $folder_path" "$GREEN"
+  else
+    print_message "Ошибки при сохранении разделов. Проверьте вывод выше." "$RED"
+  fi
+
+  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   main_menu
 }
+
 
 backup_entware() {
   output=$(mount)
