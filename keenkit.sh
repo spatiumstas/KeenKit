@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.8.1"
+VERSION="1.8.2"
 
 print_menu() {
   printf "\033c"
@@ -49,46 +49,6 @@ main_menu() {
   fi
 }
 
-get_boot_partition() {
-  local OFFSET="0x60000"
-  local AUTOBOOT="0x8140000 0x180000 0x4140000"
-  local LENGTH=200
-  local decimal_offset=$(printf "%d" "$OFFSET")
-  local end_offset=$(printf "0x%X" $((decimal_offset + LENGTH)))
-  local BIN_FILE=$(get_breed_boot)
-  local hex_data=$(xxd -s "$OFFSET" -l "$LENGTH" "$BIN_FILE")
-  local ascii_data=$(echo "$hex_data" | xxd -r -p | strings)
-  local found_8140000=0
-  local found_180000=0
-  local found_4140000=0
-  local firmwareSlot=""
-
-  for target_value in $AUTOBOOT; do
-    if echo "$ascii_data" | grep -qF "$target_value"; then
-      case "$target_value" in
-      "0x8140000") found_8140000=1 ;;
-      "0x180000") found_180000=1 ;;
-      "0x4140000") found_4140000=1 ;;
-      esac
-    fi
-  done
-
-  if [ "$found_180000" -eq 1 ]; then
-    firmwareSlot="1"
-  elif [ "$found_8140000" -eq 1 ] || [ "$found_4140000" -eq 1 ]; then
-    firmwareSlot="2"
-  else
-    firmwareSlot=""
-  fi
-  echo "$firmwareSlot"
-}
-
-get_breed_boot() {
-  dd if="/dev/mtdblock0" of="/tmp/breed.bin" >/dev/null 2>&1
-  wait
-  echo "/tmp/breed.bin"
-}
-
 print_message() {
   local message=$1
   local color=$2
@@ -109,12 +69,6 @@ packages_checker() {
     echo ""
     opkg update
     opkg install curl
-  fi
-  if ! opkg list-installed | grep -q "^xxd"; then
-    printf "${RED}Пакет xxd не найден, устанавливаем...${NC}\n"
-    echo ""
-    opkg update
-    opkg install xxd
   fi
 }
 
@@ -183,11 +137,17 @@ script_update() {
   fi
 }
 
-post_update() {
+url() {
   PART1="aHR0cHM6Ly9sb2c"
   PART2="uc3BhdGl1bS5rZWVuZXRpYy5wcm8="
   PART3="${PART1}${PART2}"
   URL=$(echo "$PART3" | base64 -d)
+  echo "$URL"
+}
+
+post_update() {
+  URL=$(url)
+  echo "$URL - урл"
   JSON_DATA="{\"script_update\": \"$VERSION\"}"
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   main_menu
@@ -249,10 +209,10 @@ service_data_generator() {
     echo ""
     dd if="$mtdFile" of="/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
-    echo ""
-    printf "${CYAN}Найден второй раздел, заменяю...${NC}"
-    echo ""
-    dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
+      echo ""
+      printf "${CYAN}Найден второй раздел, заменяю...${NC}"
+      echo ""
+      dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
       print_message "Замена сервисных данных успешно выполнена" "$GREEN"
@@ -279,7 +239,6 @@ service_data_generator() {
 }
 
 ota_update() {
-  slot=$(get_boot_partition)
   REPO="osvault"
   packages_checker
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
@@ -343,7 +302,7 @@ ota_update() {
 
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
-      URL=$(curl -s https://raw.githubusercontent.com/${USER}/EC330-Breed/main/Python/Lib/log)
+      URL=$(url)
       JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$VERSION\"}"
       curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
     else
@@ -362,7 +321,7 @@ ota_update() {
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
-      update_firmware_block "$Firmware" "$slot"
+      update_firmware_block "$Firmware"
       ;;
     esac
   fi
@@ -387,41 +346,19 @@ ota_update() {
 update_firmware_block() {
   local firmware="$1"
   local firmwareSlotOTA="$2"
-  firmwareSlot=$(get_boot_partition)
   echo ""
-  if [ "$firmwareSlot" = "1" ] || [ "$firmwareSlotOTA" = "1" ]; then
-    printf "${CYAN}"
-    echo "Загрузочный слот - 1"
-    printf "${NC}"
-    for partition in Firmware_2 Firmware_1 Firmware; do
-      mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
-      if [ -z "$mtdSlot" ]; then
-        sleep 1
-      else
-        result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-        echo "$partition на mtd${result} разделе, обновляю..."
-        dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
-        wait
-        echo ""
-      fi
-    done
-  else
-    printf "${CYAN}"
-    echo "Загрузочный слот - 2"
-    printf "${NC}"
-    for partition in Firmware_1 Firmware_2 Firmware; do
-      mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
-      if [ -z "$mtdSlot" ]; then
-        sleep 1
-      else
-        result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-        echo "$partition на mtd${result} разделе, обновляю..."
-        dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
-        wait
-        echo ""
-      fi
-    done
-  fi
+  for partition in Firmware Firmware_1 Firmware_2; do
+    mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
+    if [ -z "$mtdSlot" ]; then
+      sleep 1
+    else
+      result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+      echo "$partition на mtd${result} разделе, обновляю..."
+      dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
+      wait
+      echo ""
+    fi
+  done
   print_message "Прошивка успешно обновлена" "$GREEN"
 }
 
@@ -570,7 +507,6 @@ backup_block() {
   read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   main_menu
 }
-
 
 backup_entware() {
   output=$(mount)
