@@ -7,7 +7,7 @@ OPT_DIR="/opt"
 
 if ! opkg list-installed | grep -q "^curl"; then
   opkg update
-  opkg install curl xxd
+  opkg install curl
 fi
 curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
 mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
