@@ -24,5 +24,5 @@ opkg update && opkg install curl && curl -L -s "https://raw.githubusercontent.co
 - ## **OTA Update**
     - Онлайн обновление/даунгрейд портированных прошивок Keenetic
 
-
+1123
 ![image](https://github.com/spatiumstas/KeenKit/assets/79056064/431ef425-60c8-4d3a-80df-dadbf1d0608c)
