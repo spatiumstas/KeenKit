@@ -287,7 +287,6 @@ ota_update() {
       main_menu
     fi
     echo ""
-
     if [ -f "/tmp/$FILE" ]; then
       printf "${GREEN}Файл $FILE успешно загружен.${NC}\n"
     else
