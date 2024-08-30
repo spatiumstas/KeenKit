@@ -1,4 +1,4 @@
-[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif)](https://www.donationalerts.com/r/spatiumstas)
+[Поддержи автора!](https://yoomoney.ru/to/4100118562489849) Купи ему немного :beers: или :coffee:!
 
 # Установка
 1. Через Telnet/SSH попасть в установленный Entware
@@ -23,6 +23,9 @@ opkg update && opkg install curl && curl -L -s "https://raw.githubusercontent.co
     - Заменяет содержимое раздела на flash памяти роутера выбранным .bin файлом
 - ## **OTA Update**
     - Онлайн обновление/даунгрейд портированных прошивок Keenetic
+- ## **Заменить сервисные данные**
+    - Создаёт и перезаписывает новый U-Config с изменёнными сервисными данными
 
 
-![image](https://github.com/spatiumstas/KeenKit/assets/79056064/431ef425-60c8-4d3a-80df-dadbf1d0608c)
+![image](https://github.com/user-attachments/assets/8fda7d7e-0e9c-4991-a2bb-51e2aea1d8f0)
+
