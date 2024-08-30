@@ -4,7 +4,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.8.2"
+VERSION="1.9"
 
 print_menu() {
   printf "\033c"
@@ -147,7 +147,6 @@ url() {
 
 post_update() {
   URL=$(url)
-  echo "$URL - урл"
   JSON_DATA="{\"script_update\": \"$VERSION\"}"
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   main_menu
@@ -512,9 +511,20 @@ backup_entware() {
   identify_external_drive "Доступные накопители:" "(может не хватить места)" "true"
   echo ""
   echo "Выполняю копирование..."
-  backup_file="$selected_drive/entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
+  arch=$(uname -a | grep -oE 'mips|aarch64')
+
+  if [[ "$arch" == "mips" ]]; then
+    if grep -qE 'system type.*MediaTek' /proc/cpuinfo; then
+      arch="mipsel"
+    fi
+  fi
+  if [ -z "$arch" ]; then
+    arch="unknown"
+  fi
+  backup_file="$selected_drive/${arch}_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
   backup_output=$(tar cvzf "$backup_file" -C /opt . 2>&1)
   wait
+
   if echo "$backup_output" | grep -q "No space left on device"; then
     print_message "Бэкап не выполнен, проверьте свободное место" "$RED"
     echo ""
