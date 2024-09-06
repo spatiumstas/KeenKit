@@ -11,11 +11,11 @@ print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-  _  __                   _  __ _  _            _    ___
- | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \
- | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) |
- | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |
- |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/
+  _  __                   _  __ _  _            _    ___     _
+ | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \   / |
+ | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) |  | |
+ | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_ | |
+ |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)|_|
 EOF
   printf "${NC}"
   echo ""
@@ -520,16 +520,17 @@ backup_entware() {
   identify_external_drive "Доступные накопители:" "(может не хватить места)" "true"
   echo ""
   echo "Выполняю копирование..."
-  arch=$(uname -a | grep -oE 'mips|aarch64')
 
-  if [[ "$arch" == "mips" ]]; then
-    if grep -qE 'system type.*MediaTek' /proc/cpuinfo; then
-      arch="mipsel"
-    fi
-  fi
-  if [ -z "$arch" ]; then
-    arch="unknown"
-  fi
+  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3|armv7' | head -n 1)
+
+  case "$arch" in
+  "mips-3") arch="mips" ;;
+  "mipsel-3") arch="mipsel" ;;
+  "aarch64-3") arch="aarch64" ;;
+  "armv7") arch="armv7" ;;
+  *) arch="unknown_arch" ;;
+  esac
+
   backup_file="$selected_drive/${arch}_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
   backup_output=$(tar cvzf "$backup_file" -C /opt . 2>&1)
   wait
