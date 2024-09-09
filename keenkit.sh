@@ -5,7 +5,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.9"
+VERSION="1.9.1"
 
 print_menu() {
   printf "\033c"
