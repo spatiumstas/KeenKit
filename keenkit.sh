@@ -152,7 +152,7 @@ url() {
   PART1_DECODED=$(echo "$PART1" | base64 -d)
   PART2_DECODED=$(echo "$PART2" | base64 -d)
   URL="${PART1_DECODED}${PART2_DECODED}"
-  echo "${URL}:8443"
+  echo "${URL}"
 }
 
 post_update() {
