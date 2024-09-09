@@ -147,11 +147,12 @@ script_update() {
 }
 
 url() {
-  PART1="aHR0cHM6Ly9sb2c"
+  PART1="aHR0cHM6Ly9sb2c="
   PART2="uc3BhdGl1bS5rZWVuZXRpYy5wcm8="
-  PART3="${PART1}${PART2}"
-  URL=$(echo "$PART3" | base64 -d)
-  echo "$URL:8443"
+  PART1_DECODED=$(echo "$PART1" | base64 -d)
+  PART2_DECODED=$(echo "$PART2" | base64 -d)
+  URL="${PART1_DECODED}${PART2_DECODED}"
+  echo "${URL}:8443"
 }
 
 post_update() {
