@@ -151,7 +151,7 @@ url() {
   PART2="uc3BhdGl1bS5rZWVuZXRpYy5wcm8="
   PART3="${PART1}${PART2}"
   URL=$(echo "$PART3" | base64 -d)
-  echo "$URL"
+  echo "$URL:8443"
 }
 
 post_update() {
