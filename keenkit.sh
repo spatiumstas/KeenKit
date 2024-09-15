@@ -5,17 +5,17 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.9.1"
+VERSION="1.9.2"
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-  _  __                   _  __ _  _            _    ___     _
- | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \   / |
- | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) |  | |
- | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_ | |
- |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)|_|
+  _  __                   _  __ _  _            _    ___     ____
+ | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \   |___ \
+ | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) |    __) |
+ | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_  / __/
+ |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)|_____|
 EOF
   printf "${NC}"
   echo ""
@@ -85,7 +85,7 @@ identify_external_drive() {
   local message=$1
   local message2=$2
   local special_message=$3
-  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
+  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $1, $3}')
 
   if [ -z "$filtered_output" ]; then
     selected_drive="/opt"
@@ -104,9 +104,20 @@ identify_external_drive() {
     fi
   else
     echo ""
-    echo "Доступные накопители:"
+    echo "Загружаю накопители..."
+    echo ""
     echo "0. Встроенное хранилище $message2"
-    echo "$filtered_output" | awk '{print NR".", substr($0, 10)}'
+
+    index=1
+    echo "$filtered_output" | while read -r dev mount_point; do
+      drive_label=$(blkid | grep "$dev" | awk -F '"' '/LABEL/ {print $2}')
+      if [ -z "$drive_label" ]; then
+        drive_label="Неизвестно"
+      fi
+      echo "$index. $drive_label"
+      index=$((index + 1))
+    done
+
     echo ""
     read -p "$message " choice
     choice=$(echo "$choice" | tr -d ' \n\r')
@@ -114,7 +125,7 @@ identify_external_drive() {
     if [ "$choice" = "0" ]; then
       selected_drive="/opt"
     else
-      selected_drive=$(echo "$filtered_output" | sed -n "${choice}p")
+      selected_drive=$(echo "$filtered_output" | awk "NR==$choice {print \$2}")
       if [ -z "$selected_drive" ]; then
         echo "Недопустимый выбор. Пожалуйста, попробуйте еще раз."
         sleep 2
@@ -373,7 +384,7 @@ update_firmware_block() {
 firmware_manual_update() {
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
-  files=$(find "$selected_drive" -name '*.bin' -size +10M)
+  files=$(find "$selected_drive" -name '*.bin' -size +15M)
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
@@ -518,7 +529,7 @@ backup_block() {
 
 backup_entware() {
   output=$(mount)
-  identify_external_drive "Доступные накопители:" "(может не хватить места)" "true"
+  identify_external_drive "Выберите накопитель:" "(может не хватить места)" "true"
   echo ""
   echo "Выполняю копирование..."
 
