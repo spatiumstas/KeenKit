@@ -615,6 +615,12 @@ rewrite_block() {
   if [ "$choice" = "00" ]; then
     main_menu
   fi
+  if [ "$choice" = "0" ]; then
+      echo ""
+      printf "${RED}Загрузчик не перезаписывается!${NC}\n"
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+      main_menu
+  fi
   selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
   echo ""
   read -r -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
