@@ -5,17 +5,17 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.9.2"
+VERSION="1.9.3"
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-  _  __                   _  __ _  _            _    ___     ____
- | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \   |___ \
- | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) |    __) |
- | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_  / __/
- |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)|_____|
+  _  __                   _  __ _  _            _    ___     _____
+ | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \   |___ /
+ | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) |    |_ \
+ | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_  ___) |
+ |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)|____/
 EOF
   printf "${NC}"
   echo ""
@@ -170,6 +170,18 @@ post_update() {
   JSON_DATA="{\"script_update\": \"$VERSION\"}"
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   main_menu
+}
+
+get_architecture() {
+  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3|armv7' | head -n 1)
+
+  case "$arch" in
+  "mips-3") echo "mips" ;;
+  "mipsel-3") echo "mipsel" ;;
+  "aarch64-3") echo "aarch64" ;;
+  "armv7") echo "armv7" ;;
+  *) echo "unknown_arch" ;;
+  esac
 }
 
 service_data_generator() {
@@ -364,6 +376,10 @@ ota_update() {
 update_firmware_block() {
   local firmware="$1"
   local firmwareSlotOTA="$2"
+  local arch=$(get_architecture)
+  printf "${GREEN}"
+  echo "Архитектура устройства - ${arch}"
+  printf "${NC}"
   echo ""
   for partition in Firmware Firmware_1 Firmware_2; do
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
@@ -372,7 +388,13 @@ update_firmware_block() {
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
       echo "$partition на mtd${result} разделе, обновляю..."
-      dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
+
+      if [ "$arch" = "aarch64" ]; then
+        dd if="$firmware" of="/dev/mtd$result"
+      else
+        dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
+      fi
+
       wait
       echo ""
     fi
@@ -532,15 +554,7 @@ backup_entware() {
   echo ""
   echo "Выполняю копирование..."
 
-  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3|armv7' | head -n 1)
-
-  case "$arch" in
-  "mips-3") arch="mips" ;;
-  "mipsel-3") arch="mipsel" ;;
-  "aarch64-3") arch="aarch64" ;;
-  "armv7") arch="armv7" ;;
-  *) arch="unknown_arch" ;;
-  esac
+  arch=$(get_architecture)
 
   backup_file="$selected_drive/${arch}_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
   backup_output=$(tar cvzf "$backup_file" -C /opt . 2>&1)
