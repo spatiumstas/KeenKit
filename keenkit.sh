@@ -5,17 +5,17 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 USER="spatiumstas"
-VERSION="1.9.3"
+VERSION="1.9.4"
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-  _  __                   _  __ _  _            _    ___     _____
- | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \   |___ /
- | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) |    |_ \
- | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_  ___) |
- |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)|____/
+  _  __                   _  __ _  _            _    ___    _  _
+ | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \  | || |
+ | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) | | || |_
+ | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_|__   _|
+ |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)  |_|
 EOF
   printf "${NC}"
   echo ""
@@ -41,19 +41,20 @@ main_menu() {
     choice=$(echo "$choice" | tr -d ' \n\r')
 
     case "$choice" in
-    1) firmware_manual_update ;;
-    2) backup_block ;;
-    3) backup_entware ;;
-    4) rewrite_block ;;
-    5) ota_update ;;
-    6) service_data_generator ;;
-    99) script_update ;;
-    00) exit ;;
-    *)
-      echo "Неверный выбор. Попробуйте снова."
-      sleep 1
-      main_menu
-      ;;
+      1) firmware_manual_update ;;
+      2) backup_block ;;
+      3) backup_entware ;;
+      4) rewrite_block ;;
+      5) ota_update ;;
+      6) service_data_generator ;;
+      99) script_update "main" ;;
+      88) script_update "dev" ;;
+      00) exit ;;
+      *)
+        echo "Неверный выбор. Попробуйте снова."
+        sleep 1
+        main_menu
+        ;;
     esac
   fi
 }
@@ -136,13 +137,14 @@ identify_external_drive() {
 }
 
 script_update() {
+  BRANCH="$1"
   REPO="KeenKit"
   SCRIPT="keenkit.sh"
   TMP_DIR="/tmp"
   OPT_DIR="/opt"
 
   packages_checker
-  curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
+  curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
@@ -389,11 +391,11 @@ update_firmware_block() {
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
       echo "$partition на mtd${result} разделе, обновляю..."
 
-      if [ "$arch" = "aarch64" ]; then
-        dd if="$firmware" of="/dev/mtd$result"
-      else
-        dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
-      fi
+#      if [ "$arch" = "aarch64" ]; then
+#        dd if="$firmware" of="/dev/mtd$result"
+#      else
+      dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
+#      fi
 
       wait
       echo ""
