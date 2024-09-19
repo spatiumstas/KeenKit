@@ -394,7 +394,7 @@ update_firmware_block() {
 #      if [ "$arch" = "aarch64" ]; then
 #        dd if="$firmware" of="/dev/mtd$result"
 #      else
-      dd if="$firmware" of="/dev/mtdblock$result" bs=128k conv=fsync
+      dd if="$firmware" of="/dev/mtdblock$result"
 #      fi
 
       wait
