@@ -35,11 +35,11 @@ main_menu() {
   print_menu
   read -p "Выберите действие: " choice
 
+  choice=$(echo "$choice" | tr -d '\032' | tr -d '[A-Z]')
+
   if [ -z "$choice" ]; then
     main_menu
   else
-    choice=$(echo "$choice" | tr -d ' \n\r')
-
     case "$choice" in
       1) firmware_manual_update ;;
       2) backup_block ;;
