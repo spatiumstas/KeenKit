@@ -11,11 +11,11 @@ print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-  _  __                   _  __ _  _            _    ___    _  _
- | |/ / ___   ___  _ __  | |/ /(_)| |_  __   __/ |  / _ \  | || |
- | ' / / _ \ / _ \| '_ \ | ' / | || __| \ \ / /| | | (_) | | || |_
- | . \|  __/|  __/| | | || . \ | || |_   \ V / | | _\__, |_|__   _|
- |_|\_\\___| \___||_| |_||_|\_\|_| \__|   \_/  |_|(_) /_/(_)  |_|
+    __ __                __ __ _ __          ___ ____    ______
+   / //_/__  ___  ____  / //_/(_) /_   _   _<  // __ \  / ____/
+  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / // /_/ / /___ \
+ / /| /  __/  __/ / / / /| |/ / /_    | |/ / / \__, / ____/ /
+/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)____(_)_____/
 EOF
   printf "${NC}"
   echo ""
@@ -109,12 +109,10 @@ identify_external_drive() {
     echo ""
     echo "0. Встроенное хранилище $message2"
 
+    mount_points=""
     index=1
     echo "$filtered_output" | while read -r dev mount_point; do
       drive_label=$(blkid | grep "$dev" | awk -F '"' '/LABEL/ {print $2}')
-      if [ -z "$drive_label" ]; then
-        drive_label="Неизвестно"
-      fi
       echo "$index. $drive_label"
       index=$((index + 1))
     done
@@ -479,7 +477,6 @@ firmware_manual_update() {
 backup_block() {
   output=$(mount)
   identify_external_drive "Выберите накопитель:"
-  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $3}')
   output=$(cat /proc/mtd)
   echo ""
   printf "${GREEN}Доступные разделы:${NC}\n"
