@@ -4,19 +4,25 @@ RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
+
 USER="spatiumstas"
-VERSION="1.9.5"
+REPO="KeenKit"
+SCRIPT="keenkit.sh"
+TMP_DIR="/tmp"
+OPT_DIR="/opt"
+VERSION="1.9.6"
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-    __ __                __ __ _ __          ___ ____    ______
-   / //_/__  ___  ____  / //_/(_) /_   _   _<  // __ \  / ____/
-  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / // /_/ / /___ \
- / /| /  __/  __/ / / / /| |/ / /_    | |/ / / \__, / ____/ /
-/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)____(_)_____/
+    __ __                __ __ _ __          ___ ____   _____
+   / //_/__  ___  ____  / //_/(_) /_   _   _<  // __ \ / ___/
+  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / // /_/ // __ \
+ / /| /  __/  __/ / / / /| |/ / /_    | |/ / / \__, // /_/ /
+/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)____(_)____/
 EOF
+  printf "by ${USER}\n"
   printf "${NC}"
   echo ""
   echo "1. Обновить прошивку из файла"
@@ -27,6 +33,7 @@ EOF
   echo "6. Заменить сервисные данные"
   echo ""
   echo "00. Выход"
+  echo "88. Удалить используемые пакеты"
   echo "99. Обновить скрипт"
   echo ""
 }
@@ -34,52 +41,53 @@ EOF
 main_menu() {
   print_menu
   read -p "Выберите действие: " choice
-
+  echo ""
   choice=$(echo "$choice" | tr -d '\032' | tr -d '[A-Z]')
 
   if [ -z "$choice" ]; then
     main_menu
   else
     case "$choice" in
-      1) firmware_manual_update ;;
-      2) backup_block ;;
-      3) backup_entware ;;
-      4) rewrite_block ;;
-      5) ota_update ;;
-      6) service_data_generator ;;
-      99) script_update "main" ;;
-      88) script_update "dev" ;;
-      00) exit ;;
-      *)
-        echo "Неверный выбор. Попробуйте снова."
-        sleep 1
-        main_menu
-        ;;
+    1) firmware_manual_update ;;
+    2) backup_block ;;
+    3) backup_entware ;;
+    4) rewrite_block ;;
+    5) ota_update ;;
+    6) service_data_generator ;;
+    00) exit ;;
+    88) packages_delete ;;
+    99) script_update "main" ;;
+    999) script_update "dev" ;;
+    *)
+      echo "Неверный выбор. Попробуйте снова."
+      sleep 1
+      main_menu
+      ;;
     esac
   fi
 }
 
 print_message() {
   local message=$1
-  local color=$2
-  local len=${#message}
-  local border=$(printf '%0.s-' $(seq 1 $((len + 2))))
-
-  printf "${color}\n"
-  echo -e "\n+${border}+"
-  echo -e "| ${message} |"
-  echo -e "+${border}+\n"
-  printf "${NC}"
+  local color=${2:-$NC}
+  local border=$(printf '%0.s-' $(seq 1 $((${#message} + 2))))
+  printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
   sleep 1
 }
 
 packages_checker() {
   if ! opkg list-installed | grep -q "^curl"; then
-    printf "${RED}Пакет curl не найден, устанавливаем...${NC}\n"
-    echo ""
-    opkg update
-    opkg install curl
+    print_message "Устанавливаем curl..." "$RED"
+    opkg update && opkg install curl
   fi
+}
+
+packages_delete() {
+  opkg remove curl python3-base python3 python3-light libpython3 --force-depends
+  wait
+  print_message "Пакеты успешно удалены" "$GREEN"
+  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+  main_menu
 }
 
 identify_external_drive() {
@@ -91,7 +99,6 @@ identify_external_drive() {
   if [ -z "$filtered_output" ]; then
     selected_drive="/opt"
     if [ "$special_message" = "true" ]; then
-      echo ""
       read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
       item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
       case "$item_rc1" in
@@ -136,11 +143,6 @@ identify_external_drive() {
 
 script_update() {
   BRANCH="$1"
-  REPO="KeenKit"
-  SCRIPT="keenkit.sh"
-  TMP_DIR="/tmp"
-  OPT_DIR="/opt"
-
   packages_checker
   curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
@@ -191,8 +193,7 @@ service_data_generator() {
   SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
 
   if ! opkg list-installed | grep -q "^python3"; then
-    echo ""
-    read -p "Пакет python3 не установлен, для него необходимо 10МБ свободного места, продолжить? (y/n) " item_rc1
+    read -p "Пакет python3 не установлен, необходимо ~10МБ свободного места, продолжить установку? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
@@ -274,7 +275,6 @@ ota_update() {
   packages_checker
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
 
-  echo ""
   echo "Доступные модели:"
   i=1
   IFS=$'\n'
@@ -375,7 +375,6 @@ ota_update() {
 
 update_firmware_block() {
   local firmware="$1"
-  local firmwareSlotOTA="$2"
   local arch=$(get_architecture)
   printf "${GREEN}"
   echo "Архитектура устройства - ${arch}"
@@ -388,13 +387,7 @@ update_firmware_block() {
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
       echo "$partition на mtd${result} разделе, обновляю..."
-
-#      if [ "$arch" = "aarch64" ]; then
-#        dd if="$firmware" of="/dev/mtd$result"
-#      else
       dd if="$firmware" of="/dev/mtdblock$result"
-#      fi
-
       wait
       echo ""
     fi
@@ -424,8 +417,8 @@ firmware_manual_update() {
     main_menu
   fi
   if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
-    echo "Неверный выбор файла"
-    sleep 2
+    print_message "Неверный выбор файла" "$RED"
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
 
@@ -478,7 +471,6 @@ backup_block() {
   output=$(mount)
   identify_external_drive "Выберите накопитель:"
   output=$(cat /proc/mtd)
-  echo ""
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
   printf "${CYAN}00. Выход в главное меню\n"
@@ -493,15 +485,20 @@ backup_block() {
     main_menu
   fi
 
-  mkdir -p "$folder_path"
   error_occurred=0
   non_existent_parts=""
+  valid_parts=0
 
   if [ "$choice" = "99" ]; then
     output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
     for i in $(seq 0 $(($output_all_mtd - 1))); do
       mtd_name=$(echo "$output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
       echo "Копирую mtd$i.$mtd_name.bin..."
+      if [ $valid_parts -eq 0 ]; then
+        mkdir -p "$folder_path"
+        valid_parts=1
+      fi
+
       if ! cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin"; then
         error_occurred=1
         print_message "Ошибка: Недостаточно места для сохранения mtd$i.$mtd_name.bin" "$RED"
@@ -519,6 +516,12 @@ backup_block() {
       fi
 
       selected_mtd=$(echo "$output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+
+      if [ $valid_parts -eq 0 ]; then
+        mkdir -p "$folder_path"
+        valid_parts=1
+      fi
+
       echo "Выбран mtd$part.$selected_mtd.bin, копирую..."
       sleep 1
       if ! dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" 2>&1; then
@@ -537,10 +540,10 @@ backup_block() {
     error_occurred=1
   fi
 
-  if [ "$error_occurred" -eq 0 ]; then
-    print_message "Разделы успешно сохранены в $folder_path" "$GREEN"
+  if [ "$error_occurred" -eq 0 ] && [ $valid_parts -eq 1 ]; then
+    print_message "Раздел(ы) успешно сохранены в $folder_path" "$GREEN"
   else
-    print_message "Ошибки при сохранении разделов. Проверьте вывод выше." "$RED"
+    print_message "Ошибки при сохранении раздел(ов). Проверьте вывод выше." "$RED"
   fi
 
   read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
@@ -565,8 +568,7 @@ backup_entware() {
     read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   else
     print_message "Бэкап успешно скопирован в $backup_file" "$GREEN"
-    echo "Возврат в главное меню..."
-    sleep 2
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   fi
   main_menu
 }
@@ -582,7 +584,6 @@ rewrite_block() {
     read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
-  echo ""
   echo "Доступные файлы:"
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   echo ""
@@ -594,8 +595,8 @@ rewrite_block() {
     main_menu
   fi
   if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
-    echo "Неверный выбор файла"
-    sleep 3
+    print_message "Неверный выбор файла" "$RED"
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
 
@@ -615,10 +616,10 @@ rewrite_block() {
     main_menu
   fi
   if [ "$choice" = "0" ]; then
-      echo ""
-      printf "${RED}Загрузчик не перезаписывается!${NC}\n"
-      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-      main_menu
+    echo ""
+    printf "${RED}Загрузчик не перезаписывается!${NC}\n"
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+    main_menu
   fi
   selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
   echo ""
@@ -653,8 +654,7 @@ rewrite_block() {
     echo ""
     ;;
   esac
-  echo "Возврат в главное меню..."
-  sleep 1
+  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   main_menu
 }
 
