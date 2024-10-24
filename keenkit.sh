@@ -32,9 +32,9 @@ EOF
   echo "5. OTA Update"
   echo "6. Заменить сервисные данные"
   echo ""
-  echo "00. Выход"
   echo "88. Удалить используемые пакеты"
   echo "99. Обновить скрипт"
+  echo "00. Выход"
   echo ""
 }
 
@@ -407,7 +407,6 @@ firmware_manual_update() {
     read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
-  echo ""
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
