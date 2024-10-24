@@ -90,6 +90,15 @@ packages_delete() {
   main_menu
 }
 
+has_an_external_storage() {
+  storage_list=$(echo "mount" | grep "/dev/sda" | awk '{print $1, $3}')
+  if [ -z "$storage_list" ]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
 identify_external_drive() {
   local message=$1
   local message2=$2
@@ -270,6 +279,11 @@ service_data_generator() {
   main_menu
 }
 
+backup_config() {
+  ndmc -c show running-config > $selected_drive/running-config.txt
+  echo "Бекап настроек сохранен в $selected_drive/running-config.txt"
+}
+
 ota_update() {
   REPO="osvault"
   packages_checker
@@ -347,6 +361,16 @@ ota_update() {
     echo ""
     Firmware="/tmp/$FILE"
     FirmwareName=$(basename "$Firmware")
+
+    if has_an_external_storage; then
+    read -p "Хотите сделать резервное копирование настроек перед обновлением? (y/n) " backup_request
+      if [ "$backup_request" == "y" ]; then
+        identify_external_drive "Выберите накопитель для бекапа настроек:"
+        backup_config
+      fi
+    fi
+  fi
+
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
@@ -400,6 +424,13 @@ firmware_manual_update() {
   identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
   files=$(find "$selected_drive" -name '*.bin' -size +15M)
   count=$(echo "$files" | wc -l)
+
+  if has_an_external_storage; then
+    read -p "Хотите сделать резервное копирование настроек перед обновлением? (y/n) " backup_request
+      if [ "$backup_request" == "y" ]; then
+        backup_config
+      fi
+  fi
 
   if [ -z "$files" ]; then
     print_message "Файл обновления не найден на накопителе." "$RED"
