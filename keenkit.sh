@@ -91,7 +91,7 @@ packages_delete() {
 }
 
 has_an_external_storage() {
-  storage_list=$(echo "mount" | grep "/dev/sda" | awk '{print $1, $3}')
+  storage_list=$(echo "mount" | grep "/dev/sda")
   if [ -z "$storage_list" ]; then
     return 1
   else
@@ -369,7 +369,6 @@ ota_update() {
         backup_config
       fi
     fi
-  fi
 
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
