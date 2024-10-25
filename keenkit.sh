@@ -91,7 +91,7 @@ packages_delete() {
 }
 
 has_an_external_storage() {
-  storage_list=$(echo "mount" | grep "/dev/sda")
+  storage_list=$(mount | grep "/dev/sda")
   if [ -z "$storage_list" ]; then
     return 1
   else
