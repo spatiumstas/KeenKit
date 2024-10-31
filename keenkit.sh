@@ -273,7 +273,7 @@ service_data_generator() {
 ota_update() {
   REPO="osvault"
   packages_checker
-  DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
+  DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
 
   echo "Доступные модели:"
   i=1
