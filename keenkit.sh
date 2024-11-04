@@ -5,7 +5,7 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-USER="spatiumstas"
+USERNAME="spatiumstas"
 REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
@@ -22,7 +22,7 @@ print_menu() {
  / /| /  __/  __/ / / / /| |/ / /_    | |/ / / \__, // /_/ /
 /_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)____(_)____/
 EOF
-  printf "by ${USER}\n"
+  printf "by ${USERNAME}\n"
   printf "${NC}"
   echo ""
   echo "1. Обновить прошивку из файла"
@@ -153,7 +153,7 @@ identify_external_drive() {
 script_update() {
   BRANCH="$1"
   packages_checker
-  curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
+  curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
@@ -219,7 +219,7 @@ service_data_generator() {
   fi
 
   if [ ! -f "$SCRIPT_PATH" ]; then
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
+    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
     if [ $? -ne 0 ]; then
       print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
       return
@@ -280,14 +280,17 @@ service_data_generator() {
 }
 
 backup_config() {
-  ndmc -c show running-config > $selected_drive/running-config.txt
-  echo "Бекап настроек сохранен в $selected_drive/running-config.txt"
+  if has_an_external_storage; then
+      USER="root"
+      ndmc -c show startup-config | awk '{gsub(/\x1B\[[0-9;]*[a-zA-Z]/, ""); print}' > $selected_drive/startup-config_$(date +%Y-%m-%d_%H-%M-%S).txt
+      print_message "Бекап настроек сохранен в $selected_drive/startup-config_$(date +%Y-%m-%d_%H-%M-%S).txt" "$GREEN"
+  fi
 }
 
 ota_update() {
   REPO="osvault"
   packages_checker
-  DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
+  DIRS=$(curl -s "https://api.github.com/repos/$USERNAME/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}')
 
   echo "Доступные модели:"
   i=1
@@ -305,7 +308,7 @@ ota_update() {
   DIR_NUM=$(echo "$DIR_NUM" | tr -d ' \n\r')
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
-  BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
+  BIN_FILES=$(curl -s "https://api.github.com/repos/$USERNAME/$REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
   else
@@ -326,7 +329,7 @@ ota_update() {
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     echo ""
     echo "Загружаю прошивку..."
-    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/tmp/$FILE"; then
+    if ! curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/tmp/$FILE"; then
       print_message "Не удалось загрузить файл $FILE" "$RED"
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
@@ -339,7 +342,7 @@ ota_update() {
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
     fi
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
+    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
 
     MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     FILE_MD5SUM=$(md5sum "/tmp/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
@@ -362,14 +365,7 @@ ota_update() {
     Firmware="/tmp/$FILE"
     FirmwareName=$(basename "$Firmware")
 
-    if has_an_external_storage; then
-    read -p "Хотите сделать резервное копирование настроек перед обновлением? (y/n) " backup_request
-      if [ "$backup_request" == "y" ]; then
-        identify_external_drive "Выберите накопитель для бекапа настроек:"
-        backup_config
-      fi
-    fi
-
+    backup_config
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
@@ -424,13 +420,7 @@ firmware_manual_update() {
   files=$(find "$selected_drive" -name '*.bin' -size +15M)
   count=$(echo "$files" | wc -l)
 
-  if has_an_external_storage; then
-    read -p "Хотите сделать резервное копирование настроек перед обновлением? (y/n) " backup_request
-      if [ "$backup_request" == "y" ]; then
-        backup_config
-      fi
-  fi
-
+  backup_config
   if [ -z "$files" ]; then
     print_message "Файл обновления не найден на накопителе." "$RED"
     echo ""
