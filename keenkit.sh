@@ -10,17 +10,17 @@ REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
-VERSION="1.9.6"
+VERSION="1.10"
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-    __ __                __ __ _ __          ___ ____   _____
-   / //_/__  ___  ____  / //_/(_) /_   _   _<  // __ \ / ___/
-  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / // /_/ // __ \
- / /| /  __/  __/ / / / /| |/ / /_    | |/ / / \__, // /_/ /
-/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)____(_)____/
+    __ __                __ __ _ __          ___ _______         __
+   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  / __ \   ____/ /__ _   __
+  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / / / / /  / __  / _ \ | / /
+ / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / / /_/ /  / /_/ /  __/ |/ /
+/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)_/\____/   \__,_/\___/|___/
 EOF
   printf "by ${USER}\n"
   printf "${NC}"
@@ -174,6 +174,14 @@ post_update() {
   main_menu
 }
 
+internet_checker() {
+  if ! ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+    print_message "Нет доступа к интернету. Проверьте подключение." "$RED"
+    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+    main_menu
+  fi
+}
+
 get_architecture() {
   arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3|armv7' | head -n 1)
 
@@ -273,6 +281,7 @@ service_data_generator() {
 ota_update() {
   REPO="osvault"
   packages_checker
+  internet_checker
   DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
 
   echo "Доступные модели:"
@@ -312,23 +321,26 @@ ota_update() {
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     echo ""
     echo "Загружаю прошивку..."
-    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "/tmp/$FILE"; then
-      print_message "Не удалось загрузить файл $FILE" "$RED"
+    rm -rf "$OPT_DIR/$TMP_DIR/*"
+    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$OPT_DIR/$TMP_DIR/$FILE"; then
+      print_message "Не удалось загрузить файл $FILE. Проверьте, что на накопителе свободно более 30МБ" "$RED"
+      rm "$OPT_DIR/$TMP_DIR/$FILE"
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
     fi
     echo ""
-    if [ -f "/tmp/$FILE" ]; then
+    if [ -f "$OPT_DIR/$TMP_DIR/$FILE" ]; then
       printf "${GREEN}Файл $FILE успешно загружен.${NC}\n"
     else
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
     fi
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output /tmp/md5sum
 
-    MD5SUM=$(grep "$FILE" /tmp/md5sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-    FILE_MD5SUM=$(md5sum "/tmp/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$OPT_DIR/$TMP_DIR/md5sum"
+
+    MD5SUM=$(grep "$FILE" "$OPT_DIR/$TMP_DIR/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    FILE_MD5SUM=$(md5sum "$OPT_DIR/$TMP_DIR/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
     if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
       printf "${GREEN}MD5 хеш совпадает.${NC}\n"
@@ -336,16 +348,16 @@ ota_update() {
       JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$VERSION\"}"
       curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
     else
-      print_message "MD5 хеш не совпадает. Убедитесь что в ОЗУ свободно более 30МБ" "$RED"
+      print_message "MD5 хеш не совпадает. Убедитесь, что на накопителе свободно более 30МБ" "$RED"
       echo "Ожидаемый - $MD5SUM"
       echo "Фактический - $FILE_MD5SUM"
-      rm "/tmp/$FILE"
+      rm "$OPT_DIR/$TMP_DIR/$FILE"
       echo ""
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
     fi
     echo ""
-    Firmware="/tmp/$FILE"
+    Firmware="$OPT_DIR/$TMP_DIR/$FILE"
     FirmwareName=$(basename "$Firmware")
     read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -353,24 +365,16 @@ ota_update() {
     y | Y)
       update_firmware_block "$Firmware"
       ;;
+    n | N)
+      rm "$Firmware"
+      main_menu
+      ;;
+    *) ;;
     esac
   fi
   rm "$Firmware"
-  read -p "Перезагрузить роутер? (y/n) " item_rc1
-  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-  case "$item_rc1" in
-  y | Y)
-    echo ""
-    reboot
-    ;;
-  n | N)
-    echo ""
-    ;;
-  *) ;;
-  esac
-  echo "Возврат в главное меню..."
-  sleep 1
-  main_menu
+  print_message "Ухожу в перезагрузку..." "${CYAN}"
+  reboot
 }
 
 update_firmware_block() {
@@ -380,18 +384,24 @@ update_firmware_block() {
   echo "Архитектура устройства - ${arch}"
   printf "${NC}"
   echo ""
+
   for partition in Firmware Firmware_1 Firmware_2; do
+    mount -t tmpfs tmpfs /tmp
+    wait
+
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
     if [ -z "$mtdSlot" ]; then
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
       echo "$partition на mtd${result} разделе, обновляю..."
-      dd if="$firmware" of="/dev/mtdblock$result"
+      dd if="$firmware" of="/dev/mtdblock$result" conv=fsync
       wait
       echo ""
     fi
+    umount /tmp
   done
+
   print_message "Прошивка успешно обновлена" "$GREEN"
 }
 
@@ -443,26 +453,9 @@ firmware_manual_update() {
     *) ;;
     esac
 
-    read -p "Перезагрузить роутер? (y/n) " item_rc3
-    item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
-    case "$item_rc3" in
-    y | Y)
-      echo ""
-      reboot
-      ;;
-    n | N)
-      echo ""
-      ;;
-    *) ;;
-    esac
-    echo "Возврат в главное меню..."
-    sleep 1
-    main_menu
+    print_message "Ухожу в перезагрузку..." "${CYAN}"
+    reboot
     ;;
-  n | N)
-    main_menu
-    ;;
-  *) ;;
   esac
 }
 
