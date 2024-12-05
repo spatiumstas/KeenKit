@@ -10,17 +10,18 @@ REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
-VERSION="1.10"
+VERSION="1.11"
+MINRAMSIZE="220"
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-    __ __                __ __ _ __          ___ _______         __
-   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  / __ \   ____/ /__ _   __
-  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / / / / /  / __  / _ \ | / /
- / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / / /_/ /  / /_/ /  __/ |/ /
-/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)_/\____/   \__,_/\___/|___/
+    __ __                __ __ _ __          ___ ______
+   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  <  /
+  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / // /
+ / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / // /
+/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)_//_/
 EOF
   printf "by ${USER}\n"
   printf "${NC}"
@@ -194,88 +195,18 @@ get_architecture() {
   esac
 }
 
-service_data_generator() {
-  REPO="KeenKit"
-  OPT_DIR="/opt"
-  folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
-  SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
+mountFS() {
+  mount -t tmpfs tmpfs /tmp
+  wait
+}
 
-  if ! opkg list-installed | grep -q "^python3"; then
-    read -p "Пакет python3 не установлен, необходимо ~10МБ свободного места, продолжить установку? (y/n) " item_rc1
-    item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-    case "$item_rc1" in
-    y | Y)
-      echo ""
-      opkg update
-      opkg install python3-base python3 python3-light libpython3 --nodeps
-      ;;
-    n | N)
-      main_menu
-      return
-      ;;
-    *) ;;
-    esac
-  fi
+umountFS() {
+  umount /tmp
+  wait
+}
 
-  if [ ! -f "$SCRIPT_PATH" ]; then
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
-    if [ $? -ne 0 ]; then
-      print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
-      return
-    fi
-  fi
-
-  mkdir -p "$folder_path"
-  mtdSlot=$(grep -w 'U-Config' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  mtdSlot_res=$(grep -w 'U-Config_res' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  if [ -n "$mtdSlot" ]; then
-    dd if="/dev/mtd$mtdSlot" of="$folder_path/U-Config.bin" >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
-      print_message "Бэкап текущего U-Config сохранён в $folder_path" "$GREEN"
-    else
-      print_message "Ошибка при создании бэкапа U-Config" "$RED"
-    fi
-  fi
-
-  python3 $SCRIPT_PATH $folder_path/U-Config.bin
-  mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
-  if [ -n "$mtdFile" ]; then
-    print_message "Новые сервисные данные сохранены в $mtdFile" "$GREEN"
-  fi
-  read -p "Продолжить замену? (y/n) " item_rc1
-  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-  case "$item_rc1" in
-  y | Y)
-    echo ""
-    dd if="$mtdFile" of="/dev/mtdblock$mtdSlot"
-    if [ -n "$mtdSlot_res" ]; then
-      echo ""
-      printf "${CYAN}Найден второй раздел, заменяю...${NC}"
-      echo ""
-      dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
-    fi
-    if [ $? -eq 0 ]; then
-      print_message "Замена сервисных данных успешно выполнена" "$GREEN"
-    else
-      print_message "Ошибка при выполнении замены" "$RED"
-    fi
-    ;;
-  esac
-  read -p "Перезагрузить роутер? (y/n) " item_rc2
-  item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
-  case "$item_rc2" in
-  y | Y)
-    echo ""
-    reboot
-    ;;
-  n | N)
-    echo ""
-    ;;
-  *) ;;
-  esac
-  echo "Возврат в главное меню..."
-  sleep 1
-  main_menu
+get_ram_size() {
+  grep MemTotal /proc/meminfo | awk '{print int($2 / 1024)}'
 }
 
 ota_update() {
@@ -297,7 +228,6 @@ ota_update() {
   if [ "$DIR_NUM" = "00" ]; then
     main_menu
   fi
-  DIR_NUM=$(echo "$DIR_NUM" | tr -d ' \n\r')
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
   BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
@@ -313,80 +243,74 @@ ota_update() {
     printf "${CYAN}00. Выход в главное меню\n${NC}"
     echo ""
     read -p "Выберите прошивку: " FILE_NUM
-
     if [ "$FILE_NUM" = "00" ]; then
       main_menu
     fi
-    FILE_NUM=$(echo "$FILE_NUM" | tr -d ' \n\r')
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
-    echo ""
-    echo "Загружаю прошивку..."
-    rm -rf "$OPT_DIR/$TMP_DIR/*"
-    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$OPT_DIR/$TMP_DIR/$FILE"; then
-      print_message "Не удалось загрузить файл $FILE. Проверьте, что на накопителе свободно более 30МБ" "$RED"
-      rm "$OPT_DIR/$TMP_DIR/$FILE"
-      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+
+    ram_size=$(get_ram_size)
+    if [ "$ram_size" -lt $MINRAMSIZE ]; then
+      DOWNLOAD_PATH="$OPT_DIR"
+      use_mount=true
+    else
+      DOWNLOAD_PATH="$TMP_DIR"
+      use_mount=false
+    fi
+    printf "\nЗагружаю прошивку в $DOWNLOAD_PATH...\n"
+
+    mkdir -p "$DOWNLOAD_PATH"
+    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$DOWNLOAD_PATH/$FILE"; then
+      print_message "Не удалось загрузить файл $FILE. Проверьте свободное место" "$RED"
       main_menu
     fi
-    echo ""
-    if [ -f "$OPT_DIR/$TMP_DIR/$FILE" ]; then
-      printf "${GREEN}Файл $FILE успешно загружен.${NC}\n"
-    else
+
+    if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-      main_menu
     fi
 
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$OPT_DIR/$TMP_DIR/md5sum"
+    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
 
-    MD5SUM=$(grep "$FILE" "$OPT_DIR/$TMP_DIR/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-    FILE_MD5SUM=$(md5sum "$OPT_DIR/$TMP_DIR/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    MD5SUM=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    FILE_MD5SUM=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
-    if [ "$MD5SUM" == "$FILE_MD5SUM" ]; then
-      printf "${GREEN}MD5 хеш совпадает.${NC}\n"
-      URL=$(url)
-      JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$VERSION\"}"
-      curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
-    else
-      print_message "MD5 хеш не совпадает. Убедитесь, что на накопителе свободно более 30МБ" "$RED"
-      echo "Ожидаемый - $MD5SUM"
-      echo "Фактический - $FILE_MD5SUM"
-      rm "$OPT_DIR/$TMP_DIR/$FILE"
-      echo ""
-      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-      main_menu
+    if [ "$MD5SUM" != "$FILE_MD5SUM" ]; then
+      printf "${RED}MD5 хеш не совпадает.${NC}"
+      echo "Ожидаемый: $MD5SUM"
+      echo "Фактический: $FILE_MD5SUM"
+      rm -f "$DOWNLOAD_PATH/$FILE"
+      return
     fi
+
+    printf "${GREEN}MD5 хеш совпадает${NC}\n"
     echo ""
-    Firmware="$OPT_DIR/$TMP_DIR/$FILE"
-    FirmwareName=$(basename "$Firmware")
-    read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
-    item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-    case "$item_rc1" in
+    read -p "Выбран $FILE для обновления, всё верно? (y/n) " CONFIRM
+    case "$CONFIRM" in
     y | Y)
-      update_firmware_block "$Firmware"
+      echo "use_mount: $use_mount"
+      update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
       ;;
-    n | N)
-      rm "$Firmware"
-      main_menu
+    *)
+      echo ""
       ;;
-    *) ;;
     esac
+    rm -f "$DOWNLOAD_PATH/$FILE"
+    print_message "Перезагружаю устройство..." "${CYAN}"
+    sleep 2
+    reboot
   fi
-  rm "$Firmware"
-  print_message "Ухожу в перезагрузку..." "${CYAN}"
-  reboot
 }
 
 update_firmware_block() {
   local firmware="$1"
-  local arch=$(get_architecture)
-  printf "${GREEN}"
-  echo "Архитектура устройства - ${arch}"
-  printf "${NC}"
+  local use_mount="$2"
   echo ""
 
+  if [ "$use_mount" = true ]; then
+    mountFS
+  fi
+
   for partition in Firmware Firmware_1 Firmware_2; do
-    mount -t tmpfs tmpfs /tmp
     wait
 
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
@@ -399,24 +323,39 @@ update_firmware_block() {
       wait
       echo ""
     fi
-    umount /tmp
   done
+
+  if [ "$use_mount" = true ]; then
+    umountFS
+  fi
 
   print_message "Прошивка успешно обновлена" "$GREEN"
 }
 
 firmware_manual_update() {
-  output=$(mount)
-  identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
+  ram_size=$(get_ram_size)
+
+  if [ "$ram_size" -lt $MINRAMSIZE ]; then
+    print_message "Для этого устройства обновление доступно только из накопителя с установленной Entware" "$CYAN"
+    selected_drive="/opt"
+    use_mount=true
+  else
+    output=$(mount)
+    identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
+    selected_drive="$selected_drive"
+    use_mount=false
+  fi
+
   files=$(find "$selected_drive" -name '*.bin' -size +15M)
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
-    print_message "Файл обновления не найден на накопителе." "$RED"
+    print_message "Файл обновления не найден на накопителе" "$RED"
     echo ""
     read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
+
   echo "$files" | awk '{print NR".", substr($0, 6)}'
   printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
@@ -438,7 +377,7 @@ firmware_manual_update() {
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
-    update_firmware_block "$Firmware"
+    update_firmware_block "$Firmware" "$use_mount"
     read -p "Удалить файл обновления? (y/n) " item_rc2
     item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
     case "$item_rc2" in
@@ -452,9 +391,6 @@ firmware_manual_update() {
       ;;
     *) ;;
     esac
-
-    print_message "Ухожу в перезагрузку..." "${CYAN}"
-    reboot
     ;;
   esac
 }
@@ -647,6 +583,90 @@ rewrite_block() {
     ;;
   esac
   read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+  main_menu
+}
+
+service_data_generator() {
+  REPO="KeenKit"
+  OPT_DIR="/opt"
+  folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
+  SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
+
+  if ! opkg list-installed | grep -q "^python3"; then
+    read -p "Пакет python3 не установлен, необходимо ~10МБ свободного места, продолжить установку? (y/n) " item_rc1
+    item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+    case "$item_rc1" in
+    y | Y)
+      echo ""
+      opkg update
+      opkg install python3-base python3 python3-light libpython3 --nodeps
+      ;;
+    n | N)
+      main_menu
+      return
+      ;;
+    *) ;;
+    esac
+  fi
+
+  if [ ! -f "$SCRIPT_PATH" ]; then
+    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
+    if [ $? -ne 0 ]; then
+      print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
+      return
+    fi
+  fi
+
+  mkdir -p "$folder_path"
+  mtdSlot=$(grep -w 'U-Config' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  mtdSlot_res=$(grep -w 'U-Config_res' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  if [ -n "$mtdSlot" ]; then
+    dd if="/dev/mtd$mtdSlot" of="$folder_path/U-Config.bin" >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      print_message "Бэкап текущего U-Config сохранён в $folder_path" "$GREEN"
+    else
+      print_message "Ошибка при создании бэкапа U-Config" "$RED"
+    fi
+  fi
+
+  python3 $SCRIPT_PATH $folder_path/U-Config.bin
+  mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
+  if [ -n "$mtdFile" ]; then
+    print_message "Новые сервисные данные сохранены в $mtdFile" "$GREEN"
+  fi
+  read -p "Продолжить замену? (y/n) " item_rc1
+  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+  case "$item_rc1" in
+  y | Y)
+    echo ""
+    dd if="$mtdFile" of="/dev/mtdblock$mtdSlot"
+    if [ -n "$mtdSlot_res" ]; then
+      echo ""
+      printf "${CYAN}Найден второй раздел, заменяю...${NC}"
+      echo ""
+      dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
+    fi
+    if [ $? -eq 0 ]; then
+      print_message "Замена сервисных данных успешно выполнена" "$GREEN"
+    else
+      print_message "Ошибка при выполнении замены" "$RED"
+    fi
+    ;;
+  esac
+  read -p "Перезагрузить роутер? (y/n) " item_rc2
+  item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
+  case "$item_rc2" in
+  y | Y)
+    echo ""
+    reboot
+    ;;
+  n | N)
+    echo ""
+    ;;
+  *) ;;
+  esac
+  echo "Возврат в главное меню..."
+  sleep 1
   main_menu
 }
 
