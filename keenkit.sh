@@ -283,6 +283,7 @@ ota_update() {
     fi
 
     printf "${GREEN}MD5 хеш совпадает${NC}\n"
+    rm -f "$DOWNLOAD_PATH/md5sum"
     echo ""
     read -p "Выбран $FILE для обновления, всё верно? (y/n) " CONFIRM
     case "$CONFIRM" in
