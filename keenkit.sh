@@ -288,7 +288,6 @@ ota_update() {
     read -p "Выбран $FILE для обновления, всё верно? (y/n) " CONFIRM
     case "$CONFIRM" in
     y | Y)
-      echo "use_mount: $use_mount"
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
       ;;
     *)
@@ -297,8 +296,9 @@ ota_update() {
     esac
     rm -f "$DOWNLOAD_PATH/$FILE"
     print_message "Перезагружаю устройство..." "${CYAN}"
-    sleep 2
+    sleep 1
     reboot
+    main_menu
   fi
 }
 
@@ -307,7 +307,8 @@ update_firmware_block() {
   local use_mount="$2"
   echo ""
 
-  if [ "$use_mount" = true ]; then
+  if [ "$use_mount" = true ] || [[ "$firmware" == *"/opt"* ]]; then
+    echo "use_mount: $use_mount"
     mountFS
   fi
 
@@ -326,11 +327,9 @@ update_firmware_block() {
     fi
   done
 
-  if [ "$use_mount" = true ]; then
+  if [ "$use_mount" = true ] || [[ "$firmware" == *"/opt"* ]]; then
     umountFS
   fi
-
-  print_message "Прошивка успешно обновлена" "$GREEN"
 }
 
 firmware_manual_update() {
@@ -392,8 +391,12 @@ firmware_manual_update() {
       ;;
     *) ;;
     esac
+    print_message "Перезагружаю устройство..." "${CYAN}"
+    sleep 1
+    reboot
     ;;
   esac
+  main_menu
 }
 
 backup_block() {
