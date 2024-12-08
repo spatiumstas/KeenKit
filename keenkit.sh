@@ -10,8 +10,9 @@ REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
-VERSION="1.11"
+VERSION="1.12"
 MINRAMSIZE="220"
+PACKAGES_LIST="curl python3-base python3 python3-light libpython3"
 
 print_menu() {
   printf "\033c"
@@ -78,15 +79,37 @@ print_message() {
 
 packages_checker() {
   if ! opkg list-installed | grep -q "^curl"; then
-    print_message "Устанавливаем curl..." "$RED"
+    print_message "Устанавливаем curl..." "$GREEN"
     opkg update && opkg install curl
+    echo ""
   fi
 }
 
 packages_delete() {
-  opkg remove curl python3-base python3 python3-light libpython3 --force-depends
-  wait
-  print_message "Пакеты успешно удалены" "$GREEN"
+  delete_log=$(opkg remove $PACKAGES_LIST --autoremove 2>&1)
+  removed_packages=""
+  failed_packages=""
+
+  for package in $PACKAGES_LIST; do
+    if echo "$delete_log" | grep -q "Removing package $package"; then
+      removed_packages="$removed_packages $package"
+    elif echo "$delete_log" | grep -q "Package $package is depended upon by packages"; then
+      failed_packages="$failed_packages $package"
+    fi
+  done
+
+  if [ -n "$removed_packages" ]; then
+    print_message "Пакеты успешно удалены:$removed_packages" "$GREEN"
+  fi
+
+  if [ -n "$failed_packages" ]; then
+    print_message "Следующие пакеты не были удалены из-за зависимостей:$failed_packages" "$RED"
+  fi
+
+  if [ -z "$removed_packages" ] && [ -z "$failed_packages" ]; then
+    print_message "Используемые пакеты не установлены" "$CYAN"
+  fi
+
   read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   main_menu
 }
@@ -464,6 +487,7 @@ backup_block() {
         break
       fi
       wait
+      echo ""
     done
   fi
 
@@ -595,21 +619,36 @@ service_data_generator() {
   OPT_DIR="/opt"
   folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
   SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
+  missing_packages=""
 
-  if ! opkg list-installed | grep -q "^python3"; then
-    read -p "Пакет python3 не установлен, необходимо ~10МБ свободного места, продолжить установку? (y/n) " item_rc1
+  for package in $PACKAGES_LIST; do
+    if ! opkg list-installed | grep -q "^$package"; then
+      missing_packages="$missing_packages $package"
+    fi
+  done
+
+  if [ -n "$missing_packages" ]; then
+    read -p "Следующие пакеты отсутствуют: $missing_packages. Установить их? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
       echo ""
       opkg update
-      opkg install python3-base python3 python3-light libpython3 --nodeps
+      opkg install $missing_packages --nodeps
+      for package in $missing_packages; do
+        if ! opkg list-installed | grep -q "^$package"; then
+          print_message "Ошибка: пакет $package не установлен." "$RED"
+          main_menu
+          return
+        fi
+      done
       ;;
     n | N)
+      print_message "Необходимые пакеты не установлены." "$RED"
+      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
       main_menu
       return
       ;;
-    *) ;;
     esac
   fi
 
