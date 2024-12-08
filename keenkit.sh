@@ -5,11 +5,13 @@ GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-USER="spatiumstas"
+USERNAME="spatiumstas"
+USER='root'
 REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
+STORAGE_DIR="/storage"
 VERSION="1.12"
 MINRAMSIZE="220"
 PACKAGES_LIST="curl python3-base python3 python3-light libpython3"
@@ -19,12 +21,12 @@ print_menu() {
   printf "${CYAN}"
   cat <<'EOF'
     __ __                __ __ _ __          ___ ______
-   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  <  /
-  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / // /
- / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / // /
-/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)_//_/
+   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  /__ \
+  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / /__/ /
+ / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / // __/
+/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)_//____/
 EOF
-  printf "by ${USER}\n"
+  printf "by ${USERNAME}\n"
   printf "${NC}"
   echo ""
   echo "1. Обновить прошивку из файла"
@@ -118,10 +120,10 @@ identify_external_drive() {
   local message=$1
   local message2=$2
   local special_message=$3
-  filtered_output=$(echo "$output" | grep "/dev/sda" | awk '{print $1, $3}')
+  filtered_output=$(echo "$output" | grep "/dev/sda" | grep -v "$OPT_DIR" | awk '{print $1, $3}')
 
   if [ -z "$filtered_output" ]; then
-    selected_drive="/opt"
+    selected_drive="$STORAGE_DIR"
     if [ "$special_message" = "true" ]; then
       read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
       item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -153,7 +155,7 @@ identify_external_drive() {
     choice=$(echo "$choice" | tr -d ' \n\r')
 
     if [ "$choice" = "0" ]; then
-      selected_drive="/opt"
+      selected_drive="$STORAGE_DIR"
     else
       selected_drive=$(echo "$filtered_output" | awk "NR==$choice {print \$2}")
       if [ -z "$selected_drive" ]; then
@@ -165,10 +167,52 @@ identify_external_drive() {
   fi
 }
 
+has_an_external_storage() {
+  local output=$(mount | grep "/dev/sd")
+  if echo "$output" | grep -q "/dev/sd" && ! echo "$output" | grep -q "$OPT_DIR"; then
+    return 0
+  fi
+}
+
+backup_config() {
+  if has_an_external_storage; then
+    print_message "Обнаружены внешние накопители" "$CYAN"
+    read -p "Создать бэкап startup-config? (y/n) " user_input
+    user_input=$(echo "$user_input" | tr -d ' \n\r')
+
+    case "$user_input" in
+    y | Y)
+      identify_external_drive "Выберите накопитель:"
+
+      if [ -n "$selected_drive" ]; then
+        date="backup$(date +%Y-%m-%d_%H-%M-%S)"
+        local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
+        local folder_path="$device_uuid:/$date"
+        local backup_file="$folder_path/startup-config.txt"
+
+        mkdir -p "$selected_drive/$date"
+        ndmc -c "copy startup-config $backup_file"
+
+        if [ $? -eq 0 ]; then
+          print_message "Startup-config сохранен в $backup_file" "$GREEN"
+        else
+          print_message "Ошибка при сохранении бэкапа" "$RED"
+        fi
+      else
+        echo "Бэкап не выполнен, накопитель не выбран."
+      fi
+      ;;
+    *)
+      echo ""
+      ;;
+    esac
+  fi
+}
+
 script_update() {
   BRANCH="$1"
   packages_checker
-  curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
+  curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
@@ -236,7 +280,7 @@ ota_update() {
   REPO="osvault"
   packages_checker
   internet_checker
-  DIRS=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
+  DIRS=$(curl -s "https://api.github.com/repos/$USERNAME/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
 
   echo "Доступные модели:"
   i=1
@@ -253,7 +297,7 @@ ota_update() {
   fi
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
-  BIN_FILES=$(curl -s "https://api.github.com/repos/$USER/$REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
+  BIN_FILES=$(curl -s "https://api.github.com/repos/$USERNAME/$REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
   else
@@ -282,7 +326,7 @@ ota_update() {
     printf "\nЗагружаю прошивку в $DOWNLOAD_PATH...\n"
 
     mkdir -p "$DOWNLOAD_PATH"
-    if ! curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$DOWNLOAD_PATH/$FILE"; then
+    if ! curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$DOWNLOAD_PATH/$FILE"; then
       print_message "Не удалось загрузить файл $FILE. Проверьте свободное место" "$RED"
       main_menu
     fi
@@ -292,7 +336,7 @@ ota_update() {
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     fi
 
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
+    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
 
     MD5SUM=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     FILE_MD5SUM=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
@@ -329,8 +373,9 @@ update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
   echo ""
+  backup_config
 
-  if [ "$use_mount" = true ] || [[ "$firmware" == *"/opt"* ]]; then
+  if [ "$use_mount" = true ] || [[ "$firmware" == *"$OPT_DIR"* ]]; then
     echo "use_mount: $use_mount"
     mountFS
   fi
@@ -350,7 +395,7 @@ update_firmware_block() {
     fi
   done
 
-  if [ "$use_mount" = true ] || [[ "$firmware" == *"/opt"* ]]; then
+  if [ "$use_mount" = true ] || [[ "$firmware" == *"$OPT_DIR"* ]]; then
     umountFS
   fi
 }
@@ -360,7 +405,7 @@ firmware_manual_update() {
 
   if [ "$ram_size" -lt $MINRAMSIZE ]; then
     print_message "Для этого устройства обновление доступно только из накопителя с установленной Entware" "$CYAN"
-    selected_drive="/opt"
+    selected_drive="$STORAGE_DIR"
     use_mount=true
   else
     output=$(mount)
@@ -379,7 +424,7 @@ firmware_manual_update() {
     main_menu
   fi
 
-  echo "$files" | awk '{print NR".", substr($0, 6)}'
+  echo "$files" | awk '{print NR".", substr($0, 10)}'
   printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
   read -p "Выберите файл обновления (от 1 до $count): " choice
@@ -515,7 +560,7 @@ backup_entware() {
   arch=$(get_architecture)
 
   backup_file="$selected_drive/${arch}_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
-  backup_output=$(tar cvzf "$backup_file" -C /opt . 2>&1)
+  backup_output=$(tar cvzf "$backup_file" -C $OPT_DIR . 2>&1)
   wait
 
   if echo "$backup_output" | grep -q "No space left on device"; then
@@ -541,7 +586,7 @@ rewrite_block() {
     main_menu
   fi
   echo "Доступные файлы:"
-  echo "$files" | awk '{print NR".", substr($0, 6)}'
+  echo "$files" | awk '{print NR".", substr($0, 10)}'
   echo ""
   printf "${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
@@ -585,7 +630,7 @@ rewrite_block() {
   y | Y)
     sleep 1
     echo ""
-    rewrite=$(dd if=$mtdFile of=/dev/mtdblock$choice 2>&1)
+    rewrite=$(dd if=$mtdFile of=/dev/mtdblock$choice)
     wait
     if echo "$rewrite" | grep -q "No space left on device"; then
       print_message "Перезапись не выполнена, записываемый файл больше раздела" "$RED"
@@ -615,8 +660,6 @@ rewrite_block() {
 }
 
 service_data_generator() {
-  REPO="KeenKit"
-  OPT_DIR="/opt"
   folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
   SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
   missing_packages=""
@@ -653,7 +696,7 @@ service_data_generator() {
   fi
 
   if [ ! -f "$SCRIPT_PATH" ]; then
-    curl -L -s "https://raw.githubusercontent.com/$USER/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
+    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
     if [ $? -ne 0 ]; then
       print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
       return
@@ -690,7 +733,7 @@ service_data_generator() {
       dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
-      print_message "Замена сервисных данных успешно выполнена" "$GREEN"
+      print_message "Сервисные данные успешно заменены" "$GREEN"
     else
       print_message "Ошибка при выполнении замены" "$RED"
     fi
