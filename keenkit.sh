@@ -554,8 +554,7 @@ backup_block() {
 backup_entware() {
   output=$(mount)
   identify_external_drive "Выберите накопитель:" "(может не хватить места)" "true"
-  echo ""
-  echo "Выполняю копирование..."
+  print_message "Выполняю копирование..." "$CYAN"
 
   arch=$(get_architecture)
 
@@ -577,7 +576,7 @@ backup_entware() {
 rewrite_block() {
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом:"
-  files=$(find $selected_drive -name '*.bin')
+  files=$(find $selected_drive -name '*.bin' -size +64k)
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
     print_message "Bin файл не найден в выбранном хранилище" "$RED"
@@ -587,8 +586,7 @@ rewrite_block() {
   fi
   echo "Доступные файлы:"
   echo "$files" | awk '{print NR".", substr($0, 10)}'
-  echo ""
-  printf "${CYAN}00. Выход в главное меню${NC}\n"
+  printf "\n${CYAN}00. Выход в главное меню${NC}\n"
   echo ""
   read -p "Выберите файл для замены: " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
@@ -606,19 +604,16 @@ rewrite_block() {
   echo ""
   output=$(cat /proc/mtd)
   echo "$output" | awk 'NR>1 {print $0}'
-  echo ""
   printf "${CYAN}00. Выход в главное меню${NC}\n"
-  echo ""
-  printf "${GREEN}Выбран $mtdName для замены${NC}\n"
-  printf "${RED}Внимание, загрузчик не перезаписывается!${NC}\n"
+  printf "\n${GREEN}Выбран $mtdName для замены${NC}\n"
+  printf "\n${RED}Внимание! Загрузчик не перезаписывается!${NC}\n"
   read -p "Выберите, какой раздел перезаписать (например для mtd2 это 2): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
   if [ "$choice" = "0" ]; then
-    echo ""
-    printf "${RED}Загрузчик не перезаписывается!${NC}\n"
+    print_message "Загрузчик не перезаписывается!" "$RED"
     read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
@@ -671,11 +666,12 @@ service_data_generator() {
   done
 
   if [ -n "$missing_packages" ]; then
-    read -p "Следующие пакеты отсутствуют: $missing_packages. Установить их? (y/n) " item_rc1
+    read -p "Следующие пакеты отсутствуют:$missing_packages. Установить их? (y/n) " item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
       echo ""
+      internet_checker
       opkg update
       opkg install $missing_packages --nodeps
       for package in $missing_packages; do
