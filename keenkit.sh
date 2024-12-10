@@ -171,6 +171,8 @@ has_an_external_storage() {
   local output=$(mount | grep "/dev/sd")
   if echo "$output" | grep -q "/dev/sd" && ! echo "$output" | grep -q "$OPT_DIR"; then
     return 0
+  else
+    return 1
   fi
 }
 
@@ -374,8 +376,7 @@ update_firmware_block() {
   local use_mount="$2"
   echo ""
   backup_config
-
-  if [ "$use_mount" = true ] || [[ "$firmware" == *"$OPT_DIR"* ]]; then
+  if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     echo "use_mount: $use_mount"
     mountFS
   fi
@@ -395,7 +396,7 @@ update_firmware_block() {
     fi
   done
 
-  if [ "$use_mount" = true ] || [[ "$firmware" == *"$OPT_DIR"* ]]; then
+  if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     umountFS
   fi
 }
