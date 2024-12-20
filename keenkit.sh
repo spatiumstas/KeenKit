@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-VERSION="1.12"
+VERSION="1.13"
 MINRAMSIZE="220"
 PACKAGES_LIST="curl python3-base python3 python3-light libpython3"
 
@@ -20,10 +20,10 @@ print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-    __ __                __ __ _ __          ___ ______
-   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  /__ \
-  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / /__/ /
- / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / // __/
+    __ __                __ __ _ __          ___ ________
+   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  /__  /
+  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / / /_ <
+ / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / /___/ /
 /_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)_//____/
 EOF
   printf "by ${USERNAME}\n"
@@ -120,50 +120,66 @@ identify_external_drive() {
   local message=$1
   local message2=$2
   local special_message=$3
-  filtered_output=$(echo "$output" | grep "/dev/sda" | grep -v "$OPT_DIR" | awk '{print $1, $3}')
+  labels=""
+  uuids=""
+  index=1
+  media_found=0
+  media_output=$(ndmc -c show media)
 
-  if [ -z "$filtered_output" ]; then
+  if [ -z "$media_output" ]; then
+    echo "Не удалось получить список накопителей."
+    return
+  fi
+
+  while IFS= read -r line; do
+    if echo "$line" | grep -q "name: Media"; then
+      media_found=1
+    elif [ "$media_found" = "1" ]; then
+      if echo "$line" | grep -q "uuid:"; then
+        uuid=$(echo "$line" | awk '{print $2}')
+      elif echo "$line" | grep -q "label:"; then
+        label=$(echo "$line" | awk '{print $2}')
+        if [ -n "$uuid" ] && [ -n "$label" ]; then
+          echo "0. Встроенное хранилище $message2"
+          echo "$index. $label"
+          labels="$labels $label"
+          uuids="$uuids $uuid"
+          index=$((index + 1))
+        fi
+      fi
+    fi
+  done <<EOF
+$media_output
+EOF
+
+  if [ -z "$labels" ]; then
     selected_drive="$STORAGE_DIR"
     if [ "$special_message" = "true" ]; then
       read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
       item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
       case "$item_rc1" in
       y | Y) ;;
-
-      n | N)
-        main_menu
-        ;;
+      n | N) main_menu ;;
       *) ;;
       esac
     fi
+    return
+  fi
+
+  echo ""
+  read -p "$message " choice
+  choice=$(echo "$choice" | tr -d ' \n\r')
+
+  if [ "$choice" = "0" ]; then
+    selected_drive="$STORAGE_DIR"
   else
-    echo ""
-    echo "Загружаю накопители..."
-    echo ""
-    echo "0. Встроенное хранилище $message2"
-
-    mount_points=""
-    index=1
-    echo "$filtered_output" | while read -r dev mount_point; do
-      drive_label=$(blkid | grep "$dev" | awk -F '"' '/LABEL/ {print $2}')
-      echo "$index. $drive_label"
-      index=$((index + 1))
-    done
-
-    echo ""
-    read -p "$message " choice
-    choice=$(echo "$choice" | tr -d ' \n\r')
-
-    if [ "$choice" = "0" ]; then
-      selected_drive="$STORAGE_DIR"
-    else
-      selected_drive=$(echo "$filtered_output" | awk "NR==$choice {print \$2}")
-      if [ -z "$selected_drive" ]; then
-        echo "Недопустимый выбор. Пожалуйста, попробуйте еще раз."
-        sleep 2
-        main_menu
-      fi
+    selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice]}')
+    if [ -z "$selected_drive" ]; then
+      print_message "Недопустимый выбор" "$RED"
+      sleep 2
+      main_menu
     fi
+    selected_drive="/tmp/mnt/$selected_drive"
   fi
 }
 
@@ -180,11 +196,12 @@ backup_config() {
   if has_an_external_storage; then
     print_message "Обнаружены внешние накопители" "$CYAN"
     read -p "Создать бэкап startup-config? (y/n) " user_input
+    echo ""
     user_input=$(echo "$user_input" | tr -d ' \n\r')
 
     case "$user_input" in
     y | Y)
-      identify_external_drive "Выберите накопитель:"
+      identify_external_drive "Выберите накопитель для бэкапа:"
 
       if [ -n "$selected_drive" ]; then
         date="backup$(date +%Y-%m-%d_%H-%M-%S)"
@@ -267,11 +284,13 @@ get_architecture() {
 mountFS() {
   mount -t tmpfs tmpfs /tmp
   wait
+  print_message "LockFS: true"
 }
 
 umountFS() {
   umount /tmp
   wait
+  print_message "UnlockFS: true"
 }
 
 get_ram_size() {
@@ -377,7 +396,6 @@ update_firmware_block() {
   echo ""
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
-    echo "use_mount: $use_mount"
     mountFS
   fi
 
@@ -411,6 +429,7 @@ firmware_manual_update() {
   else
     output=$(mount)
     identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
+    echo ""
     selected_drive="$selected_drive"
     use_mount=false
   fi
@@ -585,6 +604,7 @@ rewrite_block() {
     read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     main_menu
   fi
+  echo ""
   echo "Доступные файлы:"
   echo "$files" | awk '{print NR".", substr($0, 10)}'
   printf "\n${CYAN}00. Выход в главное меню${NC}\n"
