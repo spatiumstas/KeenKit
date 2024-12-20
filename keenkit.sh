@@ -698,8 +698,8 @@ service_data_generator() {
       for package in $missing_packages; do
         if ! opkg list-installed | grep -q "^$package"; then
           print_message "Ошибка: пакет $package не установлен." "$RED"
+          read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
           main_menu
-          return
         fi
       done
       ;;
