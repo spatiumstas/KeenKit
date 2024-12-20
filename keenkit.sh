@@ -134,13 +134,13 @@ identify_external_drive() {
   while IFS= read -r line; do
     if echo "$line" | grep -q "name: Media"; then
       media_found=1
+      echo "0. Встроенное хранилище $message2"
     elif [ "$media_found" = "1" ]; then
       if echo "$line" | grep -q "uuid:"; then
         uuid=$(echo "$line" | awk '{print $2}')
       elif echo "$line" | grep -q "label:"; then
         label=$(echo "$line" | awk '{print $2}')
         if [ -n "$uuid" ] && [ -n "$label" ]; then
-          echo "0. Встроенное хранилище $message2"
           echo "$index. $label"
           labels="$labels $label"
           uuids="$uuids $uuid"
