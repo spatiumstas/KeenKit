@@ -192,6 +192,16 @@ has_an_external_storage() {
   fi
 }
 
+check_factory_country() {
+  output=$(ndmc -c show system country)
+  factory=$(echo "$output" | awk '/factory:/ {print $2}')
+
+  if [ "$factory" = "RU" ]; then
+    print_message "Страна RU, необходимо изменить на EA" "$CYAN"
+    service_data_generator "country"
+  fi
+}
+
 backup_config() {
   if has_an_external_storage; then
     print_message "Обнаружены внешние накопители" "$CYAN"
@@ -394,6 +404,7 @@ update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
   echo ""
+  check_factory_country
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     mountFS
@@ -679,6 +690,7 @@ service_data_generator() {
   folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
   SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
   missing_packages=""
+  target_flag=$1
 
   for package in $PACKAGES_LIST; do
     if ! opkg list-installed | grep -q "^$package"; then
@@ -732,7 +744,12 @@ service_data_generator() {
     fi
   fi
 
-  python3 $SCRIPT_PATH $folder_path/U-Config.bin
+  if [ -n "$target_flag" ]; then
+    python3 "$SCRIPT_PATH" "$folder_path/U-Config.bin" "$target_flag"
+  else
+    python3 "$SCRIPT_PATH" "$folder_path/U-Config.bin"
+  fi
+
   mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
   if [ -n "$mtdFile" ]; then
     print_message "Новые сервисные данные сохранены в $mtdFile" "$GREEN"
@@ -756,21 +773,23 @@ service_data_generator() {
     fi
     ;;
   esac
-  read -p "Перезагрузить роутер? (y/n) " item_rc2
-  item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
-  case "$item_rc2" in
-  y | Y)
-    echo ""
-    reboot
-    ;;
-  n | N)
-    echo ""
-    ;;
-  *) ;;
-  esac
-  echo "Возврат в главное меню..."
-  sleep 1
-  main_menu
+  if [ -z "$target_flag" ]; then
+    read -p "Перезагрузить роутер? (y/n) " item_rc2
+    item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
+    case "$item_rc2" in
+    y | Y)
+      echo ""
+      reboot
+      ;;
+    n | N)
+      echo ""
+      ;;
+    *) ;;
+    esac
+    echo "Возврат в главное меню..."
+    sleep 1
+    main_menu
+  fi
 }
 
 if [ "$1" = "script_update" ]; then
