@@ -22,7 +22,8 @@ def replace_values(filename):
     patterns = {
         'servicetag': (b'\x73\x65\x72\x76\x69\x63\x65\x74\x61\x67\x3D', string.digits),
         'sernumb': (b'\x73\x65\x72\x6E\x75\x6D\x62\x3D', string.digits),
-        'servicepass': (b'\x73\x65\x72\x76\x69\x63\x65\x70\x61\x73\x73\x3D', string.ascii_letters + string.digits)
+        'servicepass': (b'\x73\x65\x72\x76\x69\x63\x65\x70\x61\x73\x73\x3D', string.ascii_letters + string.digits),
+        'county': (b'\x63\x6F\x75\x6E\x74\x72\x79\x3D', None)
     }
 
     replacements = {}
@@ -34,24 +35,23 @@ def replace_values(filename):
             for match in matches:
                 start, end = match.span(1)
                 original_value = match.group(1)
-                if name not in replacements:
+
+                if name == 'county':
+                    new_value = b'EA'
+                elif name not in replacements:
                     if name == 'sernumb':
                         new_value = (original_value[:-4] + generate_random_string(4, chars).encode())
                     else:
                         new_value = generate_random_string(end - start, chars).encode()
-                    
+
                     replacements[name] = new_value
-
-                    if name == 'servicetag':
-                        servicetag_last_two_bytes = new_value[-4:]
-
                 else:
                     new_value = replacements[name]
 
-                data = data[:start] + new_value + data[start + len(new_value):]
+                data = data[:start] + new_value + data[start + len(original_value):]
                 print(f'{name} заменён на {new_value.decode("utf-8", errors="ignore")}')
         else:
-            print(f'{name} не найдена.')
+            print(f'{name} не найден.')
 
     if 'servicetag' in replacements:
         servicetag_last_two_bytes = replacements['servicetag'][-4:]
@@ -66,11 +66,11 @@ def replace_values(filename):
 
     with open(new_file_path, 'wb') as f:
         f.write(data)
-        # print(f'Новые данные были успешно записаны в файле {new_file_path}')  
+        # print(f'Новые данные были успешно записаны в файле {new_file_path}')
         # print('')
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        sys.exit(1) 
+        sys.exit(1)
     input_filename = sys.argv[1]
     replace_values(input_filename)
