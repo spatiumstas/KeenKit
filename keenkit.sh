@@ -169,7 +169,7 @@ EOF
   echo ""
   read -p "$message " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
-
+  echo ""
   if [ "$choice" = "0" ]; then
     selected_drive="$STORAGE_DIR"
   else
@@ -206,11 +206,11 @@ backup_config() {
   if has_an_external_storage; then
     print_message "Обнаружены внешние накопители" "$CYAN"
     read -p "Создать бэкап startup-config? (y/n) " user_input
-    echo ""
     user_input=$(echo "$user_input" | tr -d ' \n\r')
 
     case "$user_input" in
     y | Y)
+      echo ""
       identify_external_drive "Выберите накопитель для бэкапа:"
 
       if [ -n "$selected_drive" ]; then
@@ -440,7 +440,6 @@ firmware_manual_update() {
   else
     output=$(mount)
     identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
-    echo ""
     selected_drive="$selected_drive"
     use_mount=false
   fi
