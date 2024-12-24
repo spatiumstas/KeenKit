@@ -197,8 +197,19 @@ check_factory_country() {
   factory=$(echo "$output" | awk '/factory:/ {print $2}')
 
   if [ "$factory" = "RU" ]; then
-    print_message "Страна RU, необходимо изменить на EA" "$CYAN"
-    service_data_generator "country"
+    print_message "Регион роутера RU, необходимо изменить на EA" "$CYAN"
+    read -p "Изменить регион? (y/n) " user_input
+    user_input=$(echo "$user_input" | tr -d ' \n\r')
+
+    case "$user_input" in
+    y | Y)
+      service_data_generator "country"
+      ;;
+    n | N)
+      echo ""
+      ;;
+    *) ;;
+    esac
   fi
 }
 
