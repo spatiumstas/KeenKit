@@ -415,7 +415,7 @@ update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
   echo ""
-  check_factory_country
+#  check_factory_country
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     mountFS
