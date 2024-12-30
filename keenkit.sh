@@ -58,6 +58,7 @@ main_menu() {
     4) rewrite_block ;;
     5) ota_update ;;
     6) service_data_generator ;;
+    7) check_factory_country ;;
     00) exit ;;
     88) packages_delete ;;
     99) script_update "main" ;;
@@ -420,7 +421,7 @@ update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
   echo ""
-#  check_factory_country
+  check_factory_country
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     mountFS
@@ -721,14 +722,7 @@ service_data_generator() {
       echo ""
       internet_checker
       opkg update
-      opkg install $missing_packages --nodeps
-      for package in $missing_packages; do
-        if ! opkg list-installed | grep -q "^$package"; then
-          print_message "Ошибка: пакет $package не установлен." "$RED"
-          read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-          main_menu
-        fi
-      done
+      opkg install curl python3-base python3 python3-light libpython3 --nodeps
       ;;
     n | N)
       print_message "Необходимые пакеты не установлены." "$RED"
@@ -739,12 +733,10 @@ service_data_generator() {
     esac
   fi
 
-  if [ ! -f "$SCRIPT_PATH" ]; then
-    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
-    if [ $? -ne 0 ]; then
-      print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
-      return
-    fi
+  curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
+  if [ $? -ne 0 ]; then
+    print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
+    return
   fi
 
   mkdir -p "$folder_path"
