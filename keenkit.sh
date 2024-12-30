@@ -9,10 +9,11 @@ USERNAME="spatiumstas"
 USER='root'
 REPO="KeenKit"
 SCRIPT="keenkit.sh"
+OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-VERSION="1.13.1"
+VERSION="1.13.2"
 MINRAMSIZE="220"
 PACKAGES_LIST="curl python3-base python3 python3-light libpython3"
 
@@ -320,10 +321,9 @@ get_ram_size() {
 }
 
 ota_update() {
-  REPO="osvault"
   packages_checker
   internet_checker
-  DIRS=$(curl -s "https://api.github.com/repos/$USERNAME/$REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
+  DIRS=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
 
   echo "Доступные модели:"
   i=1
@@ -340,7 +340,7 @@ ota_update() {
   fi
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
-  BIN_FILES=$(curl -s "https://api.github.com/repos/$USERNAME/$REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
+  BIN_FILES=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
   else
@@ -369,7 +369,7 @@ ota_update() {
     printf "\nЗагружаю прошивку в $DOWNLOAD_PATH...\n"
 
     mkdir -p "$DOWNLOAD_PATH"
-    if ! curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$DOWNLOAD_PATH/$FILE"; then
+    if ! curl -L -s "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$DOWNLOAD_PATH/$FILE"; then
       print_message "Не удалось загрузить файл $FILE. Проверьте свободное место" "$RED"
       main_menu
     fi
@@ -379,7 +379,7 @@ ota_update() {
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
     fi
 
-    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
+    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
 
     MD5SUM=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     FILE_MD5SUM=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
@@ -421,7 +421,6 @@ update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
   echo ""
-#  check_factory_country
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     mountFS
@@ -722,7 +721,14 @@ service_data_generator() {
       echo ""
       internet_checker
       opkg update
-      opkg install curl python3-base python3 python3-light libpython3 --nodeps
+      opkg install $missing_packages --nodeps
+      for package in $missing_packages; do
+        if ! opkg list-installed | grep -q "^$package"; then
+          print_message "Ошибка: пакет $package не установлен." "$RED"
+          read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+          main_menu
+        fi
+      done
       ;;
     n | N)
       print_message "Необходимые пакеты не установлены." "$RED"
