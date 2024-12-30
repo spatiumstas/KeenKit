@@ -392,6 +392,9 @@ ota_update() {
     fi
 
     printf "${GREEN}MD5 хеш совпадает${NC}\n"
+    URL=$(url)
+    JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$VERSION\"}"
+    curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
     rm -f "$DOWNLOAD_PATH/md5sum"
     echo ""
     read -p "Выбран $FILE для обновления, всё верно? (y/n) " CONFIRM
@@ -399,9 +402,11 @@ ota_update() {
     y | Y)
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
       ;;
-    *)
-      echo ""
+    n | N)
+      rm -f "$DOWNLOAD_PATH/$FILE"
+      main_menu
       ;;
+    *) ;;
     esac
     rm -f "$DOWNLOAD_PATH/$FILE"
     print_message "Перезагружаю устройство..." "${CYAN}"
