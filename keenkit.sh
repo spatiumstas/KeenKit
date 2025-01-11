@@ -13,31 +13,36 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-VERSION="1.13.2"
-MINRAMSIZE="220"
-PACKAGES_LIST="curl python3-base python3 python3-light libpython3"
+SCRIPT_VERSION="2.0"
+MIN_RAM_SIZE="256"
+PACKAGES_LIST="python3-base python3 python3-light libpython3"
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-    __ __                __ __ _ __          ___ ________  ___
-   / //_/__  ___  ____  / //_/(_) /_   _   _<  /<  /__  / <  /
-  / ,< / _ \/ _ \/ __ \/ ,<  / / __/  | | / / / / / /_ <  / /
- / /| /  __/  __/ / / / /| |/ / /_    | |/ / / / /___/ / / /
-/_/ |_\___/\___/_/ /_/_/ |_/_/\__/    |___/_(_)_//____(_)_/
+  _  __               _  ___ _
+ | |/ /___  ___ _ __ | |/ (_) |_
+ | ' // _ \/ _ \ '_ \| ' /| | __|
+ | . \  __/  __/ | | | . \| | |_
+ |_|\_\___|\___|_| |_|_|\_\_|\__|
+
 EOF
-  printf "by ${USERNAME}\n"
-  printf "${NC}"
-  echo ""
+  printf "${RED}Модель:\t\t${NC}%s\n" "$(get_model) | $(get_architecture)"
+  printf "${RED}Версия ОС:\t${NC}%s\n" "$(get_fw_version)"
+  printf "${RED}ОЗУ:\t\t${NC}%s\n" "$(get_ram_usage)"
+  printf "${RED}Время работы:\t${NC}%s\n" "$(get_uptime)"
+  printf "${RED}Версия скрипта:\t${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
   echo "3. Бэкап Entware"
   echo "4. Заменить раздел"
   echo "5. OTA Update"
   echo "6. Заменить сервисные данные"
-  echo ""
-  echo "88. Удалить используемые пакеты"
+  if get_country; then
+    echo "7. Сменить регион"
+  fi
+  printf "\n88. Удалить используемые пакеты\n"
   echo "99. Обновить скрипт"
   echo "00. Выход"
   echo ""
@@ -59,15 +64,14 @@ main_menu() {
     4) rewrite_block ;;
     5) ota_update ;;
     6) service_data_generator ;;
-    7) check_factory_country ;;
+    7) change_country ;;
     00) exit ;;
     88) packages_delete ;;
     99) script_update "main" ;;
     999) script_update "dev" ;;
     *)
       echo "Неверный выбор. Попробуйте снова."
-      sleep 1
-      main_menu
+      exit_function
       ;;
     esac
   fi
@@ -78,7 +82,43 @@ print_message() {
   local color=${2:-$NC}
   local border=$(printf '%0.s-' $(seq 1 $((${#message} + 2))))
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
-  sleep 1
+}
+
+get_model() {
+  ndmc -c show version | grep "model" | awk -F": " '{print $2}' 2>/dev/null
+}
+
+get_fw_version() {
+  ndmc -c show version | grep "title" | awk -F": " '{print $2}' 2>/dev/null
+}
+
+get_model_id() {
+  ndmc -c show version | grep "hw_id" | awk -F": " '{print $2}' 2>/dev/null
+}
+
+get_uptime() {
+  local uptime=$(ndmc -c show system | grep "uptime" | awk '{print $2}' 2>/dev/null)
+  local days=$((uptime / 86400))
+  local hours=$(((uptime % 86400) / 3600))
+  local minutes=$(((uptime % 3600) / 60))
+  local seconds=$((uptime % 60))
+
+  if [ "$days" -gt 0 ]; then
+    printf "%d дн. %02d:%02d:%02d\n" "$days" "$hours" "$minutes" "$seconds"
+  else
+    printf "%02d:%02d:%02d\n" "$hours" "$minutes" "$seconds"
+  fi
+}
+
+get_ram_usage() {
+  local memory=$(ndmc -c show system | grep "memory:" | awk '{print $2}' 2>/dev/null)
+  local used=$(echo "$memory" | cut -d'/' -f1)
+  local total=$(echo "$memory" | cut -d'/' -f2)
+  printf "%d/%d MB\n" "$((used / 1024))" "$((total / 1024))"
+}
+
+get_ram_size() {
+  ndmc -c show system | grep "memtotal" | awk '{print int($2 / 1024)}' 2>/dev/null
 }
 
 packages_checker() {
@@ -114,8 +154,7 @@ packages_delete() {
     print_message "Используемые пакеты не установлены" "$CYAN"
   fi
 
-  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-  main_menu
+  exit_function
 }
 
 identify_external_drive() {
@@ -139,12 +178,12 @@ identify_external_drive() {
       echo "0. Встроенное хранилище $message2"
     elif [ "$media_found" = "1" ]; then
       if echo "$line" | grep -q "uuid:"; then
-        uuid=$(echo "$line" | awk '{print $2}')
+        uuid=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
       elif echo "$line" | grep -q "label:"; then
-        label=$(echo "$line" | awk '{print $2}')
+        label=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
         if [ -n "$uuid" ] && [ -n "$label" ]; then
           echo "$index. $label"
-          labels="$labels $label"
+          labels="$labels \"$label\""
           uuids="$uuids $uuid"
           index=$((index + 1))
         fi
@@ -186,19 +225,29 @@ EOF
 }
 
 has_an_external_storage() {
-  local output=$(mount | grep "/dev/sd")
-  if echo "$output" | grep -q "/dev/sd" && ! echo "$output" | grep -q "$OPT_DIR"; then
+  for line in $(mount | grep "/dev/sd"); do
+    if echo "$line" | grep -q "$OPT_DIR"; then
+      echo ""
+    else
+      return 0
+    fi
+  done
+  return 1
+}
+
+get_country() {
+  output=$(ndmc -c show system country)
+  country=$(echo "$output" | awk '/factory:/ {print $2}')
+
+  if [ "$country" = "RU" ]; then
     return 0
   else
     return 1
   fi
 }
 
-check_factory_country() {
-  output=$(ndmc -c show system country)
-  factory=$(echo "$output" | awk '/factory:/ {print $2}')
-
-  if [ "$factory" = "RU" ]; then
+change_country() {
+  if get_country; then
     print_message "Регион роутера RU, необходимо изменить на EA" "$CYAN"
     read -p "Изменить регион? (y/n) " user_input
     user_input=$(echo "$user_input" | tr -d ' \n\r')
@@ -213,6 +262,7 @@ check_factory_country() {
     *) ;;
     esac
   fi
+  exit_function
 }
 
 backup_config() {
@@ -230,8 +280,9 @@ backup_config() {
         date="backup$(date +%Y-%m-%d_%H-%M-%S)"
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
         local folder_path="$device_uuid:/$date"
-        local backup_file="$folder_path/startup-config.txt"
-
+        get_model_id=$(get_model_id)
+        get_fw_version=$(get_fw_version)
+        local backup_file="$folder_path/${get_model_id}_${get_fw_version}_startup-config.txt"
         mkdir -p "$selected_drive/$date"
         ndmc -c "copy startup-config $backup_file"
 
@@ -249,6 +300,12 @@ backup_config() {
       ;;
     esac
   fi
+}
+
+exit_function() {
+  echo ""
+  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+  main_menu
 }
 
 script_update() {
@@ -279,7 +336,7 @@ url() {
 
 post_update() {
   URL=$(url)
-  JSON_DATA="{\"script_update\": \"$VERSION\"}"
+  JSON_DATA="{\"script_update\": \"$SCRIPT_VERSION\"}"
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   main_menu
 }
@@ -287,8 +344,7 @@ post_update() {
 internet_checker() {
   if ! ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
     print_message "Нет доступа к интернету. Проверьте подключение." "$RED"
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-    main_menu
+    exit_function
   fi
 }
 
@@ -316,8 +372,29 @@ umountFS() {
   print_message "UnlockFS: true"
 }
 
-get_ram_size() {
-  grep MemTotal /proc/meminfo | awk '{print int($2 / 1024)}'
+show_progress() {
+  local total_size="$1"
+  local downloaded=0
+  local progress=0
+  local file_path="$2"
+  local file_name="$3"
+
+  while [ "$downloaded" -lt "$total_size" ]; do
+    if [ -f "$file_path" ]; then
+      downloaded=$(ls -l "$file_path" | awk '{print $5}')
+      progress=$((downloaded * 100 / total_size))
+      printf "\rЗагружаю $file_name... (%d%%)" "$progress"
+    fi
+    sleep 1
+  done
+  printf "\n"
+}
+
+get_ota_fw_name() {
+  local FILE=$1
+  URL=$(url)
+  JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$SCRIPT_VERSION\"}"
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
 }
 
 ota_update() {
@@ -332,8 +409,7 @@ ota_update() {
     printf "${CYAN}$i. $DIR${NC}\n"
     i=$((i + 1))
   done
-  printf "${CYAN}00. Выход в главное меню\n${NC}"
-  echo ""
+  printf "${CYAN}00. Выход в главное меню\n${NC}\n"
   read -p "Выберите модель: " DIR_NUM
   if [ "$DIR_NUM" = "00" ]; then
     main_menu
@@ -350,8 +426,7 @@ ota_update() {
       printf "${CYAN}$i. $FILE${NC}\n"
       i=$((i + 1))
     done
-    printf "${CYAN}00. Выход в главное меню\n${NC}"
-    echo ""
+    printf "${CYAN}00. Выход в главное меню\n${NC}\n"
     read -p "Выберите прошивку: " FILE_NUM
     if [ "$FILE_NUM" = "00" ]; then
       main_menu
@@ -359,20 +434,21 @@ ota_update() {
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
 
     ram_size=$(get_ram_size)
-    if [ "$ram_size" -lt $MINRAMSIZE ]; then
+    if [ "$ram_size" -lt $MIN_RAM_SIZE ]; then
       DOWNLOAD_PATH="$OPT_DIR"
       use_mount=true
     else
       DOWNLOAD_PATH="$TMP_DIR"
       use_mount=false
     fi
-    printf "\nЗагружаю прошивку в $DOWNLOAD_PATH...\n"
-
     mkdir -p "$DOWNLOAD_PATH"
-    if ! curl -L -s "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" --output "$DOWNLOAD_PATH/$FILE"; then
-      print_message "Не удалось загрузить файл $FILE. Проверьте свободное место" "$RED"
-      main_menu
-    fi
+    echo ""
+    total_size=$(curl -sI "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" | grep -i content-length | awk '{print $2}' | tr -d '\r')
+    show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" "$FILE" &
+    curl -L --silent \
+      "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" \
+      --output "$DOWNLOAD_PATH/$FILE"
+    wait
 
     if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
@@ -392,15 +468,12 @@ ota_update() {
       return
     fi
 
-    printf "${GREEN}MD5 хеш совпадает${NC}\n"
-    URL=$(url)
-    JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$VERSION\"}"
-    curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+    printf "${GREEN}MD5 хеш совпадает${NC}\n\n"
     rm -f "$DOWNLOAD_PATH/md5sum"
-    echo ""
-    read -p "Выбран $FILE для обновления, всё верно? (y/n) " CONFIRM
+    read -p "$(printf "Выбран ${CYAN}$FILE${NC} для обновления, всё верно? (y/n) ")" CONFIRM
     case "$CONFIRM" in
     y | Y)
+      get_ota_fw_name "$FILE"
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
       ;;
     n | N)
@@ -420,6 +493,9 @@ ota_update() {
 update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
+  if get_country; then
+    print_message "Регион роутера необходимо изменить на EA"
+  fi
   echo ""
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
@@ -449,8 +525,8 @@ update_firmware_block() {
 firmware_manual_update() {
   ram_size=$(get_ram_size)
 
-  if [ "$ram_size" -lt $MINRAMSIZE ]; then
-    print_message "Для этого устройства обновление доступно только из накопителя с установленной Entware" "$CYAN"
+  if [ "$ram_size" -lt $MIN_RAM_SIZE ]; then
+    print_message "Обновление возможно только со встроенного накопителя Entware" "$CYAN"
     selected_drive="$STORAGE_DIR"
     use_mount=true
   else
@@ -460,19 +536,17 @@ firmware_manual_update() {
     use_mount=false
   fi
 
-  files=$(find "$selected_drive" -name '*.bin' -size +10M -size -30M)
+  files=$(find "$selected_drive" -name '*.bin' -size +10M)
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
     print_message "Файл обновления не найден на накопителе" "$RED"
-    echo ""
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-    main_menu
+    exit_function
   fi
 
-  echo "$files" | awk '{print NR".", substr($0, 10)}'
-  printf "${CYAN}00. Выход в главное меню${NC}\n"
-  echo ""
+  echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
+
+  printf "${CYAN}00. Выход в главное меню${NC}\n\n"
   read -p "Выберите файл обновления (от 1 до $count): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -480,14 +554,13 @@ firmware_manual_update() {
   fi
   if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
     print_message "Неверный выбор файла" "$RED"
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-    main_menu
+    exit_function
   fi
 
   Firmware=$(echo "$files" | awk "NR==$choice")
   FirmwareName=$(basename "$Firmware")
   echo ""
-  read -p "Выбран $FirmwareName для обновления, всё верно? (y/n) " item_rc1
+  read -p "$(printf "Выбран ${GREEN}$FirmwareName${NC} для обновления, всё верно? (y/n) ")" item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
@@ -515,13 +588,12 @@ firmware_manual_update() {
 
 backup_block() {
   output=$(mount)
-  identify_external_drive "Выберите накопитель:"
+  identify_external_drive "Выберите накопитель для бэкапа:"
   output=$(cat /proc/mtd)
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
   printf "${CYAN}00. Выход в главное меню\n"
-  printf "99. Бэкап всех разделов${NC}"
-  echo -e "\n"
+  printf "99. Бэкап всех разделов${NC}\n\n"
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Укажите номер раздела(ов) разделив пробелами: " choice
   echo ""
@@ -568,8 +640,9 @@ backup_block() {
         valid_parts=1
       fi
 
-      echo "Выбран mtd$part.$selected_mtd.bin, копирую..."
+      printf "Выбран ${CYAN}mtd$part.$selected_mtd.bin${NC}, копирую..."
       sleep 1
+      echo ""
       if ! dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" 2>&1; then
         error_occurred=1
         print_message "Ошибка: Недостаточно места для сохранения mtd$part.$selected_mtd.bin" "$RED"
@@ -593,8 +666,7 @@ backup_block() {
     print_message "Ошибки при сохранении раздел(ов). Проверьте вывод выше." "$RED"
   fi
 
-  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-  main_menu
+  exit_function
 }
 
 backup_entware() {
@@ -610,31 +682,25 @@ backup_entware() {
 
   if echo "$backup_output" | grep -q "No space left on device"; then
     print_message "Бэкап не выполнен, проверьте свободное место" "$RED"
-    echo ""
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   else
     print_message "Бэкап успешно скопирован в $backup_file" "$GREEN"
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
   fi
-  main_menu
+  exit_function
 }
 
 rewrite_block() {
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом:"
-  files=$(find $selected_drive -name '*.bin' -size +64k -size -30M)
+  files=$(find $selected_drive -name '*.bin' -size +64k)
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
     print_message "Bin файл не найден в выбранном хранилище" "$RED"
-    echo ""
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-    main_menu
+    exit_function
   fi
   echo ""
-  echo "Доступные файлы:"
-  echo "$files" | awk '{print NR".", substr($0, 10)}'
-  printf "\n${CYAN}00. Выход в главное меню${NC}\n"
-  echo ""
+  echo "Найдены файлы:"
+  echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
+  printf "\n${CYAN}00. Выход в главное меню${NC}\n\n"
   read -p "Выберите файл для замены: " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -642,8 +708,7 @@ rewrite_block() {
   fi
   if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
     print_message "Неверный выбор файла" "$RED"
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-    main_menu
+    exit_function
   fi
 
   mtdFile=$(echo "$files" | awk "NR==$choice")
@@ -652,8 +717,8 @@ rewrite_block() {
   output=$(cat /proc/mtd)
   echo "$output" | awk 'NR>1 {print $0}'
   printf "${CYAN}00. Выход в главное меню${NC}\n"
-  printf "\n${GREEN}Выбран $mtdName для замены${NC}\n"
-  printf "\n${RED}Внимание! Загрузчик не перезаписывается!${NC}\n"
+  print_message "Внимание! Загрузчик не перезаписывается!" "$RED"
+  print_message "Выбран $mtdName для замены" "$GREEN"
   read -p "Выберите, какой раздел перезаписать (например для mtd2 это 2): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -661,18 +726,15 @@ rewrite_block() {
   fi
   if [ "$choice" = "0" ]; then
     print_message "Загрузчик не перезаписывается!" "$RED"
-    read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-    main_menu
+    exit_function
   fi
   selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
   echo ""
-  read -r -p "Перезаписать раздел mtd$choice.$selected_mtd вашим $mtdName? (y/n) " item_rc1
+  read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$choice.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
-    sleep 1
-    echo ""
-    rewrite=$(dd if=$mtdFile of=/dev/mtdblock$choice)
+    rewrite=$(dd if=$mtdFile of=/dev/mtdblock$choice conv=fsync)
     wait
     if echo "$rewrite" | grep -q "No space left on device"; then
       print_message "Перезапись не выполнена, записываемый файл больше раздела" "$RED"
@@ -684,7 +746,6 @@ rewrite_block() {
     item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
     case "$item_rc3" in
     y | Y)
-      echo ""
       reboot
       ;;
     n | N)
@@ -697,52 +758,32 @@ rewrite_block() {
     echo ""
     ;;
   esac
-  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-  main_menu
+  exit_function
 }
 
 service_data_generator() {
   folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
-  SCRIPT_PATH="$OPT_DIR/service_data_generator.py"
-  missing_packages=""
+  SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
 
-  for package in $PACKAGES_LIST; do
-    if ! opkg list-installed | grep -q "^$package"; then
-      missing_packages="$missing_packages $package"
-    fi
-  done
+  internet_checker && opkg update && {
+    output=$(opkg install curl python3-base python3 python3-light libpython3 --nodeps 2>&1) || {
+      print_message "Ошибка при установке:" "$RED" >&2
+      echo "$output" >&2
+      exit_function
+    }
 
-  if [ -n "$missing_packages" ]; then
-    read -p "Следующие пакеты отсутствуют:$missing_packages. Установить их? (y/n) " item_rc1
-    item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-    case "$item_rc1" in
-    y | Y)
-      echo ""
-      internet_checker
-      opkg update
-      opkg install $missing_packages --nodeps
-      for package in $missing_packages; do
-        if ! opkg list-installed | grep -q "^$package"; then
-          print_message "Ошибка: пакет $package не установлен." "$RED"
-          read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-          main_menu
-        fi
-      done
-      ;;
-    n | N)
-      print_message "Необходимые пакеты не установлены." "$RED"
-      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-      main_menu
-      return
-      ;;
-    esac
-  fi
+    if echo "$output" | grep -q "error"; then
+      print_message "Обнаружена ошибка в выводе:" "$RED" >&2
+      echo "$output" >&2
+      exit_function
+    fi
+  }
 
   curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ]; then
-    print_message "Ошибка загрузки скрипта $SCRIPT_PATH" "$RED"
-    return
+    print_message "Ошибка загрузки скрипта в $SCRIPT_PATH" "$RED"
+    exit_function
   fi
 
   mkdir -p "$folder_path"
@@ -775,8 +816,7 @@ service_data_generator() {
     dd if="$mtdFile" of="/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
       echo ""
-      printf "${CYAN}Найден второй раздел, заменяю...${NC}"
-      echo ""
+      printf "${CYAN}Найден второй раздел, заменяю...${NC}\n"
       dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
@@ -799,10 +839,9 @@ service_data_generator() {
       ;;
     *) ;;
     esac
-    echo "Возврат в главное меню..."
-    sleep 1
-    main_menu
+    exit_function
   fi
+  exit_function
 }
 
 if [ "$1" = "script_update" ]; then
