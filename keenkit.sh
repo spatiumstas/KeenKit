@@ -28,7 +28,7 @@ print_menu() {
  |_|\_\___|\___|_| |_|_|\_\_|\__|
 
 EOF
-  printf "${RED}Модель:\t\t${NC}%s\n" "$(get_model) | $(get_architecture)"
+  printf "${RED}Модель:\t\t${NC}%s\n" "$(get_device) | $(get_architecture)"
   printf "${RED}Версия ОС:\t${NC}%s\n" "$(get_fw_version)"
   printf "${RED}ОЗУ:\t\t${NC}%s\n" "$(get_ram_usage)"
   printf "${RED}Время работы:\t${NC}%s\n" "$(get_uptime)"
@@ -84,15 +84,15 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-get_model() {
-  ndmc -c show version | grep "model" | awk -F": " '{print $2}' 2>/dev/null
+get_device() {
+  ndmc -c show version | grep "device" | awk -F": " '{print $2}' 2>/dev/null
 }
 
 get_fw_version() {
   ndmc -c show version | grep "title" | awk -F": " '{print $2}' 2>/dev/null
 }
 
-get_model_id() {
+get_device_id() {
   ndmc -c show version | grep "hw_id" | awk -F": " '{print $2}' 2>/dev/null
 }
 
@@ -119,6 +119,18 @@ get_ram_usage() {
 
 get_ram_size() {
   ndmc -c show system | grep "memtotal" | awk '{print int($2 / 1024)}' 2>/dev/null
+}
+
+get_architecture() {
+  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3|armv7' | head -n 1)
+
+  case "$arch" in
+  "mips-3") echo "mips" ;;
+  "mipsel-3") echo "mipsel" ;;
+  "aarch64-3") echo "aarch64" ;;
+  "armv7") echo "armv7" ;;
+  *) echo "unknown_arch" ;;
+  esac
 }
 
 packages_checker() {
@@ -280,9 +292,9 @@ backup_config() {
         date="backup$(date +%Y-%m-%d_%H-%M-%S)"
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
         local folder_path="$device_uuid:/$date"
-        get_model_id=$(get_model_id)
+        get_device_id=$(get_device_id)
         get_fw_version=$(get_fw_version)
-        local backup_file="$folder_path/${get_model_id}_${get_fw_version}_startup-config.txt"
+        local backup_file="$folder_path/${get_device_id}_${get_fw_version}_startup-config.txt"
         mkdir -p "$selected_drive/$date"
         ndmc -c "copy startup-config $backup_file"
 
@@ -346,18 +358,6 @@ internet_checker() {
     print_message "Нет доступа к интернету. Проверьте подключение." "$RED"
     exit_function
   fi
-}
-
-get_architecture() {
-  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3|armv7' | head -n 1)
-
-  case "$arch" in
-  "mips-3") echo "mips" ;;
-  "mipsel-3") echo "mipsel" ;;
-  "aarch64-3") echo "aarch64" ;;
-  "armv7") echo "armv7" ;;
-  *) echo "unknown_arch" ;;
-  esac
 }
 
 mountFS() {
