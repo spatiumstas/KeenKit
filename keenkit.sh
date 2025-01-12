@@ -78,8 +78,8 @@ main_menu() {
 }
 
 print_message() {
-  local message=$1
-  local color=${2:-$NC}
+  local message="$1"
+  local color="${2:-$NC}"
   local border=$(printf '%0.s-' $(seq 1 $((${#message} + 2))))
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
@@ -114,7 +114,7 @@ get_ram_usage() {
   local memory=$(ndmc -c show system | grep "memory:" | awk '{print $2}' 2>/dev/null)
   local used=$(echo "$memory" | cut -d'/' -f1)
   local total=$(echo "$memory" | cut -d'/' -f2)
-  printf "%d/%d MB\n" "$((used / 1024))" "$((total / 1024))"
+  printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
 }
 
 get_ram_size() {
@@ -401,7 +401,10 @@ ota_update() {
   packages_checker
   internet_checker
   DIRS=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
-
+  if [ -z "$DIRS" ]; then
+    print_message "Ошибка при получении данных с GitHub, попробуйте позже или через VPN" "$RED"
+    exit_function
+  fi
   echo "Доступные модели:"
   i=1
   IFS=$'\n'
