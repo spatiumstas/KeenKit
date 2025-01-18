@@ -400,11 +400,16 @@ get_ota_fw_name() {
 ota_update() {
   packages_checker
   internet_checker
-  DIRS=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
+  REQUEST=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/")
+  DIRS=$(echo "$REQUEST" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
+
   if [ -z "$DIRS" ]; then
+    MESSAGE=$(echo "$REQUEST" | grep -Po '"message":.*?[^\\]",' | awk -F'"' '{print $4}')
     print_message "Ошибка при получении данных с GitHub, попробуйте позже или через VPN" "$RED"
+    echo "$MESSAGE"
     exit_function
   fi
+
   echo "Доступные модели:"
   i=1
   IFS=$'\n'
