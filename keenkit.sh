@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.0"
+SCRIPT_VERSION="2.0.1"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 
@@ -71,7 +71,6 @@ main_menu() {
     999) script_update "dev" ;;
     *)
       echo "Неверный выбор. Попробуйте снова."
-      exit_function
       ;;
     esac
   fi
@@ -519,7 +518,13 @@ update_firmware_block() {
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
       echo "$partition на mtd${result} разделе, обновляю..."
-      dd if="$firmware" of="/dev/mtdblock$result" conv=fsync
+
+      output=$(dd if="$firmware" of="/dev/mtdblock$result" conv=fsync 2>&1)
+      if echo "$output" | grep -q "No space left on device"; then
+        print_message "Ошибка при обновлении ${partition}: $output" "$RED"
+        exit_function
+      fi
+
       wait
       echo ""
     fi
@@ -544,7 +549,7 @@ firmware_manual_update() {
     use_mount=false
   fi
 
-  files=$(find "$selected_drive" -name '*.bin' -size +10M)
+  files=$(find "$selected_drive" -name '*.bin')
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
@@ -699,7 +704,7 @@ backup_entware() {
 rewrite_block() {
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом:"
-  files=$(find $selected_drive -name '*.bin' -size +64k)
+  files=$(find $selected_drive -name '*.bin')
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
     print_message "Bin файл не найден в выбранном хранилище" "$RED"
