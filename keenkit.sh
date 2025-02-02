@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.0.1"
+SCRIPT_VERSION="2.1"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 
@@ -28,11 +28,11 @@ print_menu() {
  |_|\_\___|\___|_| |_|_|\_\_|\__|
 
 EOF
-  printf "${RED}Модель:\t\t${NC}%s\n" "$(get_device) | $(get_architecture)"
-  printf "${RED}Версия ОС:\t${NC}%s\n" "$(get_fw_version)"
-  printf "${RED}ОЗУ:\t\t${NC}%s\n" "$(get_ram_usage)"
-  printf "${RED}Время работы:\t${NC}%s\n" "$(get_uptime)"
-  printf "${RED}Версия скрипта:\t${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
+  printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_architecture)"
+  printf "${RED}Версия ОС:      ${NC}%s\n" "$(get_fw_version)"
+  printf "${RED}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
+  printf "${RED}Время работы:   ${NC}%s\n" "$(get_uptime)"
+  printf "${RED}Версия скрипта: ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
   echo "3. Бэкап Entware"
@@ -71,6 +71,8 @@ main_menu() {
     999) script_update "dev" ;;
     *)
       echo "Неверный выбор. Попробуйте снова."
+      sleep 1
+      main_menu
       ;;
     esac
   fi
@@ -166,6 +168,18 @@ packages_delete() {
   fi
 
   exit_function
+}
+
+perform_dd() {
+  local input_file="$1"
+  local output_file="$2"
+
+  output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
+
+  if echo "$output" | grep -iq "error\|can't"; then
+    print_message "Ошибка при перезаписи раздела" "$RED"
+    exit_function
+  fi
 }
 
 identify_external_drive() {
@@ -319,6 +333,10 @@ exit_function() {
   main_menu
 }
 
+exit_main_menu() {
+  printf "\n${CYAN}00. Выход в главное меню${NC}\n\n"
+}
+
 script_update() {
   BRANCH="$1"
   packages_checker
@@ -361,13 +379,11 @@ internet_checker() {
 
 mountFS() {
   mount -t tmpfs tmpfs /tmp
-  wait
   print_message "LockFS: true"
 }
 
 umountFS() {
   umount /tmp
-  wait
   print_message "UnlockFS: true"
 }
 
@@ -413,10 +429,10 @@ ota_update() {
   i=1
   IFS=$'\n'
   for DIR in $DIRS; do
-    printf "${CYAN}$i. $DIR${NC}\n"
+    printf "$i. $DIR\n"
     i=$((i + 1))
   done
-  printf "${CYAN}00. Выход в главное меню\n${NC}\n"
+  exit_main_menu
   read -p "Выберите модель: " DIR_NUM
   if [ "$DIR_NUM" = "00" ]; then
     main_menu
@@ -430,10 +446,10 @@ ota_update() {
     printf "\nПрошивки для $DIR:\n"
     i=1
     for FILE in $BIN_FILES; do
-      printf "${CYAN}$i. $FILE${NC}\n"
+      printf "$i. $FILE\n"
       i=$((i + 1))
     done
-    printf "${CYAN}00. Выход в главное меню\n${NC}\n"
+    exit_main_menu
     read -p "Выберите прошивку: " FILE_NUM
     if [ "$FILE_NUM" = "00" ]; then
       main_menu
@@ -455,7 +471,6 @@ ota_update() {
     curl -L --silent \
       "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" \
       --output "$DOWNLOAD_PATH/$FILE"
-    wait
 
     if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
@@ -477,7 +492,7 @@ ota_update() {
 
     printf "${GREEN}MD5 хеш совпадает${NC}\n\n"
     rm -f "$DOWNLOAD_PATH/md5sum"
-    read -p "$(printf "Выбран ${CYAN}$FILE${NC} для обновления, всё верно? (y/n) ")" CONFIRM
+    read -p "$(printf "Выбран ${GREEN}$FILE${NC} для обновления, всё верно? (y/n) ")" CONFIRM
     case "$CONFIRM" in
     y | Y)
       get_ota_fw_name "$FILE"
@@ -510,22 +525,13 @@ update_firmware_block() {
   fi
 
   for partition in Firmware Firmware_1 Firmware_2; do
-    wait
-
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
     if [ -z "$mtdSlot" ]; then
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
       echo "$partition на mtd${result} разделе, обновляю..."
-
-      output=$(dd if="$firmware" of="/dev/mtdblock$result" conv=fsync 2>&1)
-      if echo "$output" | grep -q "No space left on device"; then
-        print_message "Ошибка при обновлении ${partition}: $output" "$RED"
-        exit_function
-      fi
-
-      wait
+      perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
     fi
   done
@@ -559,7 +565,7 @@ firmware_manual_update() {
 
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
 
-  printf "${CYAN}00. Выход в главное меню${NC}\n\n"
+  exit_main_menu
   read -p "Выберите файл обновления (от 1 до $count): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -583,7 +589,6 @@ firmware_manual_update() {
     case "$item_rc2" in
     y | Y)
       rm "$Firmware"
-      wait
       sleep 2
       ;;
     n | N)
@@ -605,8 +610,8 @@ backup_block() {
   output=$(cat /proc/mtd)
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$output" | awk 'NR>1 {print $0}'
-  printf "${CYAN}00. Выход в главное меню\n"
-  printf "99. Бэкап всех разделов${NC}\n\n"
+  printf "99. Бэкап всех разделов${NC}\n"
+  exit_main_menu
   folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
   read -p "Укажите номер раздела(ов) разделив пробелами: " choice
   echo ""
@@ -637,7 +642,6 @@ backup_block() {
         read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
         break
       fi
-      wait
     done
   else
     for part in $choice; do
@@ -653,17 +657,10 @@ backup_block() {
         valid_parts=1
       fi
 
-      printf "Выбран ${CYAN}mtd$part.$selected_mtd.bin${NC}, копирую..."
+      printf "Выбран ${GREEN}mtd$part.$selected_mtd.bin${NC}, копирую..."
       sleep 1
       echo ""
-      if ! dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" 2>&1; then
-        error_occurred=1
-        print_message "Ошибка: Недостаточно места для сохранения mtd$part.$selected_mtd.bin" "$RED"
-        echo ""
-        read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-        break
-      fi
-      wait
+      perform_dd "/dev/mtd$part" "$folder_path/mtd$part.$selected_mtd.bin"
       echo ""
     done
   fi
@@ -678,7 +675,6 @@ backup_block() {
   else
     print_message "Ошибки при сохранении раздел(ов). Проверьте вывод выше." "$RED"
   fi
-
   exit_function
 }
 
@@ -687,14 +683,12 @@ backup_entware() {
   identify_external_drive "Выберите накопитель:" "(может не хватить места)" "true"
   print_message "Выполняю копирование..." "$CYAN"
 
-  arch=$(get_architecture)
+  backup_file="$selected_drive/$(get_architecture)_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
+  tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" . 2>&1)
 
-  backup_file="$selected_drive/${arch}_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
-  backup_output=$(tar cvzf "$backup_file" -C $OPT_DIR . 2>&1)
-  wait
-
-  if echo "$backup_output" | grep -q "No space left on device"; then
-    print_message "Бэкап не выполнен, проверьте свободное место" "$RED"
+  if echo "$tar_output" | grep -iq "error\|no space left on device"; then
+    print_message "Ошибка при создании бэкапа:" "$RED"
+    echo "$tar_output"
   else
     print_message "Бэкап успешно скопирован в $backup_file" "$GREEN"
   fi
@@ -713,7 +707,7 @@ rewrite_block() {
   echo ""
   echo "Найдены файлы:"
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
-  printf "\n${CYAN}00. Выход в главное меню${NC}\n\n"
+  exit_main_menu
   read -p "Выберите файл для замены: " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -729,9 +723,8 @@ rewrite_block() {
   echo ""
   output=$(cat /proc/mtd)
   echo "$output" | awk 'NR>1 {print $0}'
-  printf "${CYAN}00. Выход в главное меню${NC}\n"
+  exit_main_menu
   print_message "Внимание! Загрузчик не перезаписывается!" "$RED"
-  print_message "Выбран $mtdName для замены" "$GREEN"
   read -p "Выберите, какой раздел перезаписать (например для mtd2 это 2): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
@@ -745,16 +738,11 @@ rewrite_block() {
   echo ""
   read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$choice.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+  echo ""
   case "$item_rc1" in
   y | Y)
-    rewrite=$(dd if=$mtdFile of=/dev/mtdblock$choice conv=fsync)
-    wait
-    if echo "$rewrite" | grep -q "No space left on device"; then
-      print_message "Перезапись не выполнена, записываемый файл больше раздела" "$RED"
-    else
-      print_message "Раздел успешно перезаписан" "$GREEN"
-    fi
-    printf "${NC}"
+    perform_dd "$mtdFile" "/dev/mtdblock$choice"
+    print_message "Раздел успешно перезаписан" "$GREEN"
     read -r -p "Перезагрузить роутер? (y/n) " item_rc3
     item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
     case "$item_rc3" in
@@ -779,7 +767,7 @@ service_data_generator() {
   SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
 
-  internet_checker && opkg update && {
+  internet_checker && opkg update && echo "" && {
     output=$(opkg install curl python3-base python3 python3-light libpython3 --nodeps 2>&1) || {
       print_message "Ошибка при установке:" "$RED" >&2
       echo "$output" >&2
@@ -803,7 +791,7 @@ service_data_generator() {
   mtdSlot=$(grep -w 'U-Config' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
   mtdSlot_res=$(grep -w 'U-Config_res' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
   if [ -n "$mtdSlot" ]; then
-    dd if="/dev/mtd$mtdSlot" of="$folder_path/U-Config.bin" >/dev/null 2>&1
+    perform_dd "/dev/mtd$mtdSlot" "$folder_path/U-Config.bin"
     if [ $? -eq 0 ]; then
       print_message "Бэкап текущего U-Config сохранён в $folder_path" "$GREEN"
     else
@@ -826,11 +814,12 @@ service_data_generator() {
   case "$item_rc1" in
   y | Y)
     echo ""
-    dd if="$mtdFile" of="/dev/mtdblock$mtdSlot"
+    printf "${CYAN}Перезаписываю первый раздел...${NC}\n"
+    perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
       echo ""
-      printf "${CYAN}Найден второй раздел, заменяю...${NC}\n"
-      dd if="$mtdFile" of="/dev/mtdblock$mtdSlot_res"
+      printf "${CYAN}Найден второй раздел, перезаписываю...${NC}\n"
+      perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
       print_message "Сервисные данные успешно заменены" "$GREEN"
