@@ -497,6 +497,7 @@ ota_update() {
     y | Y)
       get_ota_fw_name "$FILE"
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
+      print_message "Прошивка успешно обновлена" "$GREEN"
       ;;
     n | N)
       rm -f "$DOWNLOAD_PATH/$FILE"
@@ -584,6 +585,7 @@ firmware_manual_update() {
   case "$item_rc1" in
   y | Y)
     update_firmware_block "$Firmware" "$use_mount"
+    print_message "Прошивка успешно обновлена" "$GREEN"
     read -p "Удалить файл обновления? (y/n) " item_rc2
     item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
     case "$item_rc2" in
