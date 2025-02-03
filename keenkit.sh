@@ -346,7 +346,6 @@ script_update() {
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
     chmod +x $OPT_DIR/$SCRIPT
     cd $OPT_DIR/bin
-    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/KeenKit
     ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
     print_message "Скрипт успешно обновлён" "$GREEN"
     $OPT_DIR/$SCRIPT post_update
