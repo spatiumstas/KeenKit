@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.1"
+SCRIPT_VERSION="2.1.1"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 
@@ -191,46 +191,74 @@ identify_external_drive() {
   index=1
   media_found=0
   media_output=$(ndmc -c show media)
+  current_manufacturer=""
 
   if [ -z "$media_output" ]; then
-    echo "Не удалось получить список накопителей."
-    return
+    print_message "Не удалось получить список накопителей" "$RED"
+    return 1
   fi
 
+  echo "0. Встроенное хранилище $message2"
+
   while IFS= read -r line; do
-    if echo "$line" | grep -q "name: Media"; then
+    case "$line" in
+    *"name: Media"*)
       media_found=1
-      echo "0. Встроенное хранилище $message2"
-    elif [ "$media_found" = "1" ]; then
-      if echo "$line" | grep -q "uuid:"; then
-        uuid=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
-      elif echo "$line" | grep -q "label:"; then
-        label=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
-        if [ -n "$uuid" ] && [ -n "$label" ]; then
-          echo "$index. $label"
-          labels="$labels \"$label\""
-          uuids="$uuids $uuid"
-          index=$((index + 1))
-        fi
+      current_manufacturer=""
+      ;;
+    *"manufacturer:"*)
+      if [ "$media_found" = "1" ]; then
+        current_manufacturer=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
       fi
-    fi
+      ;;
+    *"uuid:"*)
+      if [ "$media_found" = "1" ]; then
+        uuid=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
+        read -r label_line
+        read -r fstype_line
+        read -r state_line
+        read -r total_line
+        read -r free_line
+
+        label=$(echo "$label_line" | cut -d ':' -f2- | sed 's/^ *//g')
+        fstype=$(echo "$fstype_line" | cut -d ':' -f2- | sed 's/^ *//g')
+        free_bytes=$(echo "$free_line" | cut -d ':' -f2- | sed 's/^ *//g')
+
+        if [ "$fstype" = "swap" ]; then
+          uuid=""
+          continue
+        fi
+
+        free_mb=$((free_bytes / 1024 / 1024))
+        free_gb=$((free_mb / 1024))
+
+        if [ "$free_mb" -lt 1024 ]; then
+          free_display="$free_mb"
+          unit="MB"
+        else
+          free_display="$free_gb"
+          unit="GB"
+        fi
+
+        if [ -n "$label" ]; then
+          display_name="$label"
+        elif [ -n "$current_manufacturer" ]; then
+          display_name="$current_manufacturer"
+        else
+          display_name="Unknown"
+        fi
+
+        echo "$index. $display_name ($fstype, ${free_display}${unit})"
+        labels="$labels \"$display_name\""
+        uuids="$uuids $uuid"
+        index=$((index + 1))
+        uuid=""
+      fi
+      ;;
+    esac
   done <<EOF
 $media_output
 EOF
-
-  if [ -z "$labels" ]; then
-    selected_drive="$STORAGE_DIR"
-    if [ "$special_message" = "true" ]; then
-      read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
-      item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-      case "$item_rc1" in
-      y | Y) ;;
-      n | N) main_menu ;;
-      *) ;;
-      esac
-    fi
-    return
-  fi
 
   echo ""
   read -p "$message " choice
@@ -241,9 +269,8 @@ EOF
   else
     selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice]}')
     if [ -z "$selected_drive" ]; then
-      print_message "Недопустимый выбор" "$RED"
-      sleep 2
-      main_menu
+      print_message "Неверный выбор" "$RED"
+      exit_function
     fi
     selected_drive="/tmp/mnt/$selected_drive"
   fi
@@ -305,9 +332,7 @@ backup_config() {
         date="backup$(date +%Y-%m-%d_%H-%M-%S)"
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
         local folder_path="$device_uuid:/$date"
-        get_device_id=$(get_device_id)
-        get_fw_version=$(get_fw_version)
-        local backup_file="$folder_path/${get_device_id}_${get_fw_version}_startup-config.txt"
+        local backup_file="$folder_path/$(get_device_id)_$(get_fw_version)_startup-config.txt"
         mkdir -p "$selected_drive/$date"
         ndmc -c "copy startup-config $backup_file"
 
