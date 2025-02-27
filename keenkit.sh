@@ -580,7 +580,7 @@ firmware_manual_update() {
     use_mount=false
   fi
 
-  files=$(find "$selected_drive" -name '*.bin')
+  files=$(find "$selected_drive" -name '*.bin' -size +10M)
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
