@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.1.1"
+SCRIPT_VERSION="2.1.2"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 
@@ -710,11 +710,12 @@ backup_entware() {
   print_message "Выполняю копирование..." "$CYAN"
 
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
-  tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" . 2>&1)
+  tar_output=$(tar cvzf "$backup_file" --ignore-failed-read -C "$OPT_DIR" . 2>&1)
+  log_operation=$(echo "$tar_output" | tail -n 2)
 
-  if echo "$tar_output" | grep -iq "error\|no space left on device"; then
+  if echo "$log_operation" | grep -iq "error\|no space left on device"; then
     print_message "Ошибка при создании бэкапа:" "$RED"
-    echo "$tar_output"
+    echo "$log_operation"
   else
     print_message "Бэкап успешно скопирован в $backup_file" "$GREEN"
   fi
