@@ -13,9 +13,10 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.1.2"
+SCRIPT_VERSION="2.1.3"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
+DATE=$(date +%Y-%m-%d_%H-%M)
 
 print_menu() {
   printf "\033c"
@@ -329,11 +330,10 @@ backup_config() {
       identify_external_drive "Выберите накопитель для бэкапа:"
 
       if [ -n "$selected_drive" ]; then
-        date="backup$(date +%Y-%m-%d_%H-%M-%S)"
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
-        local folder_path="$device_uuid:/$date"
+        local folder_path="$device_uuid:/backup$DATE"
         local backup_file="$folder_path/$(get_device_id)_$(get_fw_version)_startup-config.txt"
-        mkdir -p "$selected_drive/$date"
+        mkdir -p "$selected_drive/backup$DATE"
         ndmc -c "copy startup-config $backup_file"
 
         if [ $? -eq 0 ]; then
@@ -638,7 +638,7 @@ backup_block() {
   echo "$output" | awk 'NR>1 {print $0}'
   printf "99. Бэкап всех разделов${NC}\n"
   exit_main_menu
-  folder_path="$selected_drive/backup$(date +%Y-%m-%d_%H-%M-%S)"
+  folder_path="$selected_drive/backup$DATE"
   read -p "Укажите номер раздела(ов) разделив пробелами: " choice
   echo ""
   choice=$(echo "$choice" | tr -d '\n\r')
@@ -709,8 +709,8 @@ backup_entware() {
   identify_external_drive "Выберите накопитель:" "(может не хватить места)" "true"
   print_message "Выполняю копирование..." "$CYAN"
 
-  backup_file="$selected_drive/$(get_architecture)_entware_backup_$(date +%Y-%m-%d_%H-%M-%S).tar.gz"
-  tar_output=$(tar cvzf "$backup_file" --ignore-failed-read -C "$OPT_DIR" . 2>&1)
+  backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
+  tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" . 2>&1)
   log_operation=$(echo "$tar_output" | tail -n 2)
 
   if echo "$log_operation" | grep -iq "error\|no space left on device"; then
@@ -790,7 +790,7 @@ rewrite_block() {
 }
 
 service_data_generator() {
-  folder_path="$OPT_DIR/backup$(date +%Y-%m-%d_%H-%M-%S)"
+  folder_path="$OPT_DIR/backup$DATE"
   SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
 
