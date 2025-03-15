@@ -686,7 +686,13 @@ backup_block() {
       printf "Выбран ${GREEN}mtd$part.$selected_mtd.bin${NC}, копирую..."
       sleep 1
       echo ""
-      perform_dd "/dev/mtd$part" "$folder_path/mtd$part.$selected_mtd.bin"
+      if ! dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" 2>&1; then
+        error_occurred=1
+        print_message "Ошибка: Недостаточно места для сохранения mtd$part.$selected_mtd.bin" "$RED"
+        echo ""
+        read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+        break
+      fi
       echo ""
     done
   fi
