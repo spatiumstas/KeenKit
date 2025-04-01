@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.1.3"
+SCRIPT_VERSION="2.1.4"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -199,12 +199,11 @@ identify_external_drive() {
     return 1
   fi
 
-  echo "0. Встроенное хранилище $message2"
-
   while IFS= read -r line; do
     case "$line" in
     *"name: Media"*)
       media_found=1
+      echo "0. Встроенное хранилище $message2"
       current_manufacturer=""
       ;;
     *"manufacturer:"*)
@@ -260,6 +259,21 @@ identify_external_drive() {
   done <<EOF
 $media_output
 EOF
+
+  if [ -z "$labels" ]; then
+    selected_drive="$STORAGE_DIR"
+    if [ "$special_message" = "true" ]; then
+      echo ""
+      read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
+      item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+      case "$item_rc1" in
+      y | Y) ;;
+      n | N) exit_function ;;
+      *) ;;
+      esac
+    fi
+    return
+  fi
 
   echo ""
   read -p "$message " choice
@@ -580,7 +594,7 @@ firmware_manual_update() {
     use_mount=false
   fi
 
-  files=$(find "$selected_drive" -name '*.bin' -size +10M)
+  files=$(find "$selected_drive" -name '*.bin' -size +1M)
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
@@ -703,9 +717,9 @@ backup_block() {
   fi
 
   if [ "$error_occurred" -eq 0 ] && [ $valid_parts -eq 1 ]; then
-    print_message "Раздел(ы) успешно сохранены в $folder_path" "$GREEN"
+    print_message "Успешно сохранено в $folder_path" "$GREEN"
   else
-    print_message "Ошибки при сохранении раздел(ов). Проверьте вывод выше." "$RED"
+    print_message "Ошибки при сохранении. Проверьте вывод выше." "$RED"
   fi
   exit_function
 }
@@ -758,7 +772,7 @@ rewrite_block() {
   echo "$output" | awk 'NR>1 {print $0}'
   exit_main_menu
   print_message "Внимание! Загрузчик не перезаписывается!" "$RED"
-  read -p "Выберите, какой раздел перезаписать (например для mtd2 это 2): " choice
+  read -p "Выберите, какой раздел перезаписать (например mtd2 это 2): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
@@ -774,8 +788,14 @@ rewrite_block() {
   echo ""
   case "$item_rc1" in
   y | Y)
+    if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
+      mountFS
+    fi
     perform_dd "$mtdFile" "/dev/mtdblock$choice"
     print_message "Раздел успешно перезаписан" "$GREEN"
+    if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
+      umountFS
+    fi
     read -r -p "Перезагрузить роутер? (y/n) " item_rc3
     item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
     case "$item_rc3" in
