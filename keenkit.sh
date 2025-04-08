@@ -506,10 +506,13 @@ ota_update() {
     echo ""
     total_size=$(curl -sI "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" | grep -i content-length | awk '{print $2}' | tr -d '\r')
     show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" "$FILE" &
+    progress_pid=$!
+
     curl -L --silent \
       "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" \
       --output "$DOWNLOAD_PATH/$FILE"
 
+    wait $progress_pid
     if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
       read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
