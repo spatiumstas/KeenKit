@@ -41,7 +41,7 @@ EOF
   echo "5. OTA Update"
   echo "6. Заменить сервисные данные"
   if get_country; then
-    echo "7. Сменить регион"
+    printf "${RED}7. Сменить регион${NC}\n"
   fi
   printf "\n88. Удалить используемые пакеты\n"
   echo "99. Обновить скрипт"
@@ -627,6 +627,7 @@ firmware_manual_update() {
   y | Y)
     update_firmware_block "$Firmware" "$use_mount"
     print_message "Прошивка успешно обновлена" "$GREEN"
+    printf "${NC}"
     read -p "Удалить файл обновления? (y/n) " item_rc2
     item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
     case "$item_rc2" in
