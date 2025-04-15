@@ -749,10 +749,10 @@ backup_entware() {
 rewrite_block() {
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом:"
-  files=$(find $selected_drive -name '*.bin')
+  files=$(find $selected_drive -name '*.bin' -size 64k)
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
-    print_message "Bin файл не найден в выбранном хранилище" "$RED"
+    print_message "Файл для замены не найден в выбранном хранилище" "$RED"
     exit_function
   fi
   echo ""
