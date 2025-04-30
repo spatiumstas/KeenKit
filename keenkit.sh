@@ -37,11 +37,13 @@ EOF
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
   echo "3. Бэкап Entware"
-  echo "4. Заменить раздел"
-  echo "5. OTA Update"
-  echo "6. Заменить сервисные данные"
-  if get_country; then
-    printf "${RED}7. Сменить регион${NC}\n"
+  if get_host; then
+    echo "4. Заменить раздел"
+    echo "5. OTA Update"
+    echo "6. Заменить сервисные данные"
+    if get_country; then
+      printf "${RED}7. Сменить регион${NC}\n"
+    fi
   fi
   printf "\n88. Удалить используемые пакеты\n"
   echo "99. Обновить скрипт"
@@ -133,6 +135,10 @@ get_architecture() {
   "armv7") echo "armv7" ;;
   *) echo "unknown_arch" ;;
   esac
+}
+
+get_host() {
+  ndmc -c show ndss | grep -q "127.0.0.1"
 }
 
 packages_checker() {
