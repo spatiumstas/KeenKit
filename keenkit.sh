@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.1.5"
+SCRIPT_VERSION="2.1.6"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -136,9 +136,9 @@ get_architecture() {
 }
 
 packages_checker() {
-  if ! opkg list-installed | grep -q "^curl"; then
-    print_message "Устанавливаем curl..." "$GREEN"
-    opkg update && opkg install curl
+  if ! opkg list-installed | grep -q "^curl|^tar"; then
+    print_message "Устанавливаем curl/tar..." "$GREEN"
+    opkg update && opkg install curl tar
     echo ""
   fi
 }
@@ -390,6 +390,7 @@ script_update() {
     $OPT_DIR/$SCRIPT post_update
   else
     print_message "Ошибка при скачивании скрипта" "$RED"
+    exit_function
   fi
 }
 
@@ -729,6 +730,7 @@ backup_block() {
 }
 
 backup_entware() {
+  packages_checker
   output=$(mount)
   identify_external_drive "Выберите накопитель:" "(может не хватить места)" "true"
   print_message "Выполняю копирование..." "$CYAN"
