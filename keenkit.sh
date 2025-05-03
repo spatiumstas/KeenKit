@@ -142,7 +142,7 @@ get_host() {
 }
 
 packages_checker() {
-  if ! opkg list-installed | grep -q "^curl|^tar"; then
+  if ! opkg list-installed | grep -q "^curl" || ! opkg list-installed | grep -q "^tar"; then
     print_message "Устанавливаем curl/tar..." "$GREEN"
     opkg update && opkg install curl tar
     echo ""
@@ -390,8 +390,10 @@ script_update() {
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
     chmod +x $OPT_DIR/$SCRIPT
-    cd $OPT_DIR/bin
-    ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
+    if [ ! -f "$OPT_DIR/bin/keenkit" ]; then
+      cd $OPT_DIR/bin
+      ln -s "$OPT_DIR/$SCRIPT" "$OPT_DIR/bin/keenkit"
+    fi
     print_message "Скрипт успешно обновлён" "$GREEN"
     $OPT_DIR/$SCRIPT post_update
   else
@@ -400,16 +402,8 @@ script_update() {
   fi
 }
 
-url() {
-  PART1="aHR0cHM6Ly9sb2c"
-  PART2="uc3BhdGl1bS5rZWVuZXRpYy5wcm8="
-  PART3="${PART1}${PART2}"
-  URL=$(echo "$PART3" | base64 -d)
-  echo "${URL}"
-}
-
 post_update() {
-  URL=$(url)
+  URL=$(echo "aHR0cHM6Ly9sb2cuc3BhdGl1bS5rZWVuZXRpYy5wcm8=" | base64 -d)
   JSON_DATA="{\"script_update\": \"$SCRIPT_VERSION\"}"
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   main_menu
