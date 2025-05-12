@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.1.6"
+SCRIPT_VERSION="2.1.7"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -30,7 +30,7 @@ print_menu() {
 
 EOF
   printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_architecture)"
-  printf "${RED}Версия ОС:      ${NC}%s\n" "$(get_fw_version)"
+  printf "${RED}Версия ОС:      ${NC}%s\n" "$(get_fw_version) | Слот: "$(get_boot_current)""
   printf "${RED}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
   printf "${RED}Время работы:   ${NC}%s\n" "$(get_uptime)"
   printf "${RED}Версия скрипта: ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
@@ -123,6 +123,14 @@ get_ram_usage() {
 
 get_ram_size() {
   ndmc -c show system | grep "memtotal" | awk '{print int($2 / 1024)}' 2>/dev/null
+}
+
+get_boot_current() {
+  cat /proc/dual_image/boot_current 2>/dev/null
+}
+
+get_storage_version() {
+  strings /lib/modules/4.9-ndm-5/ndm_storage.ko 2>/dev/null | grep -q "version="
 }
 
 get_architecture() {
@@ -254,7 +262,7 @@ identify_external_drive() {
           display_name="Unknown"
         fi
 
-        echo "$index. $display_name ($fstype, ${free_display}${unit})"
+        echo "$index. $display_name ($(echo "$fstype" | tr '[:lower:]' '[:upper:]'), ${free_display}${unit})"
         labels="$labels \"$display_name\""
         uuids="$uuids $uuid"
         index=$((index + 1))
@@ -335,7 +343,7 @@ change_country() {
     *) ;;
     esac
   fi
-  exit_function
+  main_menu
 }
 
 backup_config() {
@@ -452,6 +460,9 @@ get_ota_fw_name() {
 }
 
 ota_update() {
+  if ! get_host; then
+    main_menu
+  fi
   packages_checker
   internet_checker
   REQUEST=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/")
@@ -561,13 +572,15 @@ update_firmware_block() {
   if get_country; then
     print_message "Регион роутера необходимо изменить на EA"
   fi
-  echo ""
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     mountFS
   fi
 
   for partition in Firmware Firmware_1 Firmware_2; do
+    if [ "$partition" = "Firmware_2" ] && get_storage_version; then
+      continue
+    fi
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
     if [ -z "$mtdSlot" ]; then
       sleep 1
@@ -749,6 +762,9 @@ backup_entware() {
 }
 
 rewrite_block() {
+  if ! get_host; then
+    main_menu
+  fi
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом:"
   files=$(find $selected_drive -name '*.bin' -size +60k)
@@ -822,6 +838,9 @@ rewrite_block() {
 }
 
 service_data_generator() {
+  if ! get_host; then
+    main_menu
+  fi
   folder_path="$OPT_DIR/backup$DATE"
   SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
