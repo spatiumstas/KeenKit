@@ -130,7 +130,7 @@ get_boot_current() {
 }
 
 get_storage_version() {
-  strings /lib/modules/4.9-ndm-5/ndm_storage.ko 2>/dev/null | grep -q "version="
+  strings /lib/modules/4.9-ndm-5/ndm_storage.ko 2>/dev/null | grep -q "Firmware_2\|Storage_C"
 }
 
 get_architecture() {
@@ -147,6 +147,12 @@ get_architecture() {
 
 get_host() {
   ndmc -c show ndss | grep -q "127.0.0.1"
+}
+
+check_host() {
+  if ! get_host; then
+    main_menu
+  fi
 }
 
 packages_checker() {
@@ -460,9 +466,7 @@ get_ota_fw_name() {
 }
 
 ota_update() {
-  if ! get_host; then
-    main_menu
-  fi
+  check_host
   packages_checker
   internet_checker
   REQUEST=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/")
@@ -762,9 +766,7 @@ backup_entware() {
 }
 
 rewrite_block() {
-  if ! get_host; then
-    main_menu
-  fi
+  check_host
   output=$(mount)
   identify_external_drive "Выберите накопитель с размещённым файлом:"
   files=$(find $selected_drive -name '*.bin' -size +60k)
@@ -838,9 +840,7 @@ rewrite_block() {
 }
 
 service_data_generator() {
-  if ! get_host; then
-    main_menu
-  fi
+  check_host
   folder_path="$OPT_DIR/backup$DATE"
   SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
