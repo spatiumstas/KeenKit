@@ -32,7 +32,7 @@ EOF
   printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_architecture)"
   printf "${RED}Версия ОС:      ${NC}%s\n" "$(get_fw_version) | Слот: "$(get_boot_current)""
   printf "${RED}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
-  printf "${RED}Хранилище:      ${NC}%s\n" "$(get_space)"
+  printf "${RED}Хранилище:      ${NC}%s\n" "$(get_storage)"
   printf "${RED}Время работы:   ${NC}%s\n" "$(get_uptime)"
   printf "${RED}Версия скрипта: ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
   echo "1. Обновить прошивку из файла"
@@ -127,7 +127,7 @@ get_ram_usage() {
   printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
 }
 
-get_space() {
+get_storage() {
   local storage_info=$(rci_request "ls" | grep -A 10 '"storage:":' | grep -E '"free":|"total":' | awk -F'"' '{print $4}')
   local free=$(echo "$storage_info" | head -n1)
   local total=$(echo "$storage_info" | tail -n1)
@@ -145,7 +145,7 @@ get_boot_current() {
   cat /proc/dual_image/boot_current 2>/dev/null
 }
 
-get_storage_version() {
+get_ndm_storage() {
   strings /lib/modules/4.9-ndm-5/ndm_storage.ko 2>/dev/null | grep -q "Firmware_2\|Storage_C"
 }
 
@@ -414,7 +414,6 @@ exit_main_menu() {
 
 script_update() {
   BRANCH="$1"
-  packages_checker
   curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
@@ -440,7 +439,7 @@ url() {
 post_update() {
   URL=$(url)
   JSON_DATA="{\"script_update\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s &
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
   main_menu
 }
 
@@ -483,7 +482,7 @@ get_ota_fw_name() {
   local FILE=$1
   URL=$(url)
   JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s &
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
 }
 
 ota_update() {
@@ -603,7 +602,7 @@ update_firmware_block() {
   fi
 
   for partition in Firmware Firmware_1 Firmware_2; do
-    if [ "$partition" = "Firmware_2" ] && get_storage_version; then
+    if [ "$partition" = "Firmware_2" ] && get_ndm_storage; then
       continue
     fi
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
