@@ -4,8 +4,10 @@ import string
 import sys
 import re
 
+
 def generate_random_string(length, chars):
     return ''.join(random.choice(chars) for _ in range(length))
+
 
 def replace_values(filename, target=None):
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +42,11 @@ def replace_values(filename, target=None):
                 original_value = match.group(1)
 
                 if name == 'country':
-                    new_value = b'EA'
+                    if original_value != b'EA':
+                        new_value = b'EA'
+                        data = data[:start] + new_value + data[start + len(original_value):]
+                        print(f'{name} заменён на {new_value.decode("utf-8", errors="ignore")}')
+                    continue
                 elif name not in replacements:
                     if name == 'sernumb':
                         new_value = (original_value[:-4] + generate_random_string(4, chars).encode())
@@ -61,7 +67,6 @@ def replace_values(filename, target=None):
         servicetag_last_two_bytes = replacements['servicetag'][-4:]
         servicetag_suffix = servicetag_last_two_bytes.decode('utf-8', errors='ignore')
     else:
-        # print("Не удалось получить последние 2 байта из servicetag. Использую 'XXXX' по умолчанию.")
         servicetag_suffix = target
 
     base, ext = os.path.splitext(filename)
@@ -70,7 +75,7 @@ def replace_values(filename, target=None):
 
     with open(new_file_path, 'wb') as f:
         f.write(data)
-        # print(f'Новые данные были успешно записаны в файле {new_file_path}')
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

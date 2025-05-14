@@ -13,7 +13,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.1.7"
+SCRIPT_VERSION="2.2"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -32,6 +32,7 @@ EOF
   printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_architecture)"
   printf "${RED}Версия ОС:      ${NC}%s\n" "$(get_fw_version) | Слот: "$(get_boot_current)""
   printf "${RED}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
+  printf "${RED}Хранилище:      ${NC}%s\n" "$(get_space)"
   printf "${RED}Время работы:   ${NC}%s\n" "$(get_uptime)"
   printf "${RED}Версия скрипта: ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
   echo "1. Обновить прошивку из файла"
@@ -81,6 +82,11 @@ main_menu() {
   fi
 }
 
+rci_request() {
+  local endpoint="$1"
+  curl -s "http://localhost:79/rci/$endpoint"
+}
+
 print_message() {
   local message="$1"
   local color="${2:-$NC}"
@@ -89,19 +95,19 @@ print_message() {
 }
 
 get_device() {
-  ndmc -c show version | grep "device" | awk -F": " '{print $2}' 2>/dev/null
+  rci_request "show/version" | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_fw_version() {
-  ndmc -c show version | grep "title" | awk -F": " '{print $2}' 2>/dev/null
+  rci_request "show/version" | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_device_id() {
-  ndmc -c show version | grep "hw_id" | awk -F": " '{print $2}' 2>/dev/null
+  rci_request "show/version" | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_uptime() {
-  local uptime=$(ndmc -c show system | grep "uptime" | awk '{print $2}' 2>/dev/null)
+  local uptime=$(rci_request "show/system" | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
   local days=$((uptime / 86400))
   local hours=$(((uptime % 86400) / 3600))
   local minutes=$(((uptime % 3600) / 60))
@@ -115,14 +121,24 @@ get_uptime() {
 }
 
 get_ram_usage() {
-  local memory=$(ndmc -c show system | grep "memory:" | awk '{print $2}' 2>/dev/null)
+  local memory=$(rci_request "show/system" | grep -o '"memory": "[^"]*"' | cut -d'"' -f4 2>/dev/null)
   local used=$(echo "$memory" | cut -d'/' -f1)
   local total=$(echo "$memory" | cut -d'/' -f2)
   printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
 }
 
+get_space() {
+  local storage_info=$(rci_request "ls" | grep -A 10 '"storage:":' | grep -E '"free":|"total":' | awk -F'"' '{print $4}')
+  local free=$(echo "$storage_info" | head -n1)
+  local total=$(echo "$storage_info" | tail -n1)
+  local used=$((total - free))
+  local used_mb=$((used / 1024 / 1024))
+  local total_mb=$((total / 1024 / 1024))
+  printf "%d / %d MB\n" "$used_mb" "$total_mb"
+}
+
 get_ram_size() {
-  ndmc -c show system | grep "memtotal" | awk '{print int($2 / 1024)}' 2>/dev/null
+  rci_request "show/system" | grep -o '"memtotal": [0-9]*' | cut -d' ' -f2 | awk '{print int($1 / 1024)}' 2>/dev/null
 }
 
 get_boot_current() {
@@ -146,7 +162,7 @@ get_architecture() {
 }
 
 get_host() {
-  ndmc -c show ndss | grep -q "127.0.0.1"
+  rci_request "show/ndss" | grep -q "127.0.0.1"
 }
 
 check_host() {
@@ -323,8 +339,8 @@ has_an_external_storage() {
 }
 
 get_country() {
-  output=$(ndmc -c show system country)
-  country=$(echo "$output" | awk '/factory:/ {print $2}')
+  output=$(rci_request "show/system/country")
+  country=$(echo "$output" | grep -o '"factory": "[^"]*"' | cut -d'"' -f4)
 
   if [ "$country" = "RU" ]; then
     return 0
@@ -338,7 +354,7 @@ change_country() {
     print_message "Регион роутера RU, необходимо изменить на EA" "$CYAN"
     read -p "Изменить регион? (y/n) " user_input
     user_input=$(echo "$user_input" | tr -d ' \n\r')
-
+    echo ""
     case "$user_input" in
     y | Y)
       service_data_generator "country"
@@ -416,10 +432,15 @@ script_update() {
   fi
 }
 
-post_update() {
+url() {
   URL=$(echo "aHR0cHM6Ly9sb2cuc3BhdGl1bS5rZWVuZXRpYy5wcm8=" | base64 -d)
+  echo "${URL}"
+}
+
+post_update() {
+  URL=$(url)
   JSON_DATA="{\"script_update\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s &
   main_menu
 }
 
@@ -462,7 +483,7 @@ get_ota_fw_name() {
   local FILE=$1
   URL=$(url)
   JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s &
 }
 
 ota_update() {
@@ -558,7 +579,7 @@ ota_update() {
       ;;
     n | N)
       rm -f "$DOWNLOAD_PATH/$FILE"
-      main_menu
+      exit_function
       ;;
     *) ;;
     esac
@@ -669,13 +690,13 @@ firmware_manual_update() {
 backup_block() {
   output=$(mount)
   identify_external_drive "Выберите накопитель для бэкапа:"
-  output=$(cat /proc/mtd)
+  mtd_output=$(cat /proc/mtd)
   printf "${GREEN}Доступные разделы:${NC}\n"
-  echo "$output" | awk 'NR>1 {print $0}'
+  echo "$mtd_output" | awk 'NR>1 {print $0}'
   printf "99. Бэкап всех разделов${NC}\n"
   exit_main_menu
   folder_path="$selected_drive/backup$DATE"
-  read -p "Укажите номер раздела(ов) разделив пробелами: " choice
+  read -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice
   echo ""
   choice=$(echo "$choice" | tr -d '\n\r')
 
@@ -690,7 +711,7 @@ backup_block() {
   if [ "$choice" = "99" ]; then
     output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
     for i in $(seq 0 $(($output_all_mtd - 1))); do
-      mtd_name=$(echo "$output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+      mtd_name=$(echo "$mtd_output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
       echo "Копирую mtd$i.$mtd_name.bin..."
       if [ $valid_parts -eq 0 ]; then
         mkdir -p "$folder_path"
@@ -707,12 +728,12 @@ backup_block() {
     done
   else
     for part in $choice; do
-      if ! echo "$output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
+      if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
         non_existent_parts="$non_existent_parts $part"
         continue
       fi
 
-      selected_mtd=$(echo "$output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+      selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
 
       if [ $valid_parts -eq 0 ]; then
         mkdir -p "$folder_path"
@@ -775,7 +796,6 @@ rewrite_block() {
     print_message "Файл для замены не найден в выбранном хранилище" "$RED"
     exit_function
   fi
-  echo ""
   echo "Найдены файлы:"
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
   exit_main_menu
@@ -792,37 +812,63 @@ rewrite_block() {
   mtdFile=$(echo "$files" | awk "NR==$choice")
   mtdName=$(basename "$mtdFile")
   echo ""
-  output=$(cat /proc/mtd)
-  echo "$output" | awk 'NR>1 {print $0}'
+  mtd_output=$(cat /proc/mtd)
+  echo "$mtd_output" | awk 'NR>1 {print $0}'
   exit_main_menu
   print_message "Внимание! Загрузчик не перезаписывается!" "$RED"
-  read -p "Выберите, какой раздел перезаписать (например mtd2 это 2): " choice
-  choice=$(echo "$choice" | tr -d ' \n\r')
+  read -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice
+  choice=$(echo "$choice" | tr -d '\n\r')
+
   if [ "$choice" = "00" ]; then
     main_menu
   fi
-  if [ "$choice" = "0" ]; then
-    print_message "Загрузчик не перезаписывается!" "$RED"
-    exit_function
+
+  error_occurred=0
+  non_existent_parts=""
+  valid_parts=0
+
+  for part in $choice; do
+    if [ "$part" = "0" ]; then
+      print_message "Загрузчик не перезаписывается!" "$RED"
+      continue
+    fi
+
+    if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
+      non_existent_parts="$non_existent_parts $part"
+      continue
+    fi
+
+    selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+    echo ""
+    read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$part.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
+    item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
+    case "$item_rc1" in
+    y | Y)
+      if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
+        mountFS
+      fi
+      perform_dd "$mtdFile" "/dev/mtdblock$part"
+      print_message "Раздел успешно перезаписан" "$GREEN"
+      if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
+        umountFS
+      fi
+      ;;
+    n | N)
+      echo ""
+      ;;
+    *) ;;
+    esac
+  done
+
+  if [ -n "$non_existent_parts" ]; then
+    print_message "Ошибка: Раздела${non_existent_parts} не существует!" "$RED"
+    error_occurred=1
   fi
-  selected_mtd=$(echo "$output" | awk -v i=$choice 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
-  echo ""
-  read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$choice.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
-  item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-  echo ""
-  case "$item_rc1" in
-  y | Y)
-    if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
-      mountFS
-    fi
-    perform_dd "$mtdFile" "/dev/mtdblock$choice"
-    print_message "Раздел успешно перезаписан" "$GREEN"
-    if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
-      umountFS
-    fi
-    read -r -p "Перезагрузить роутер? (y/n) " item_rc3
-    item_rc3=$(echo "$item_rc3" | tr -d ' \n\r')
-    case "$item_rc3" in
+
+  if [ "$error_occurred" -eq 0 ]; then
+    read -r -p "Перезагрузить роутер? (y/n) " item_rc2
+    item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
+    case "$item_rc2" in
     y | Y)
       reboot
       ;;
@@ -831,11 +877,7 @@ rewrite_block() {
       ;;
     *) ;;
     esac
-    ;;
-  n | N)
-    echo ""
-    ;;
-  esac
+  fi
   exit_function
 }
 

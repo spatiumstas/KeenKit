@@ -5,9 +5,8 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 
-if ! opkg list-installed | grep -q "^curl"; then
-  opkg update
-  opkg install curl
+if ! opkg list-installed | grep -q "^curl" || ! opkg list-installed | grep -q "^tar"; then
+  opkg update && opkg install curl tar
 fi
 
 curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
