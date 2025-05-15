@@ -485,6 +485,7 @@ get_ota_fw_name() {
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
 }
 
+
 ota_update() {
   check_host
   packages_checker
