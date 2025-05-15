@@ -487,6 +487,7 @@ get_ota_fw_name() {
 
 
 
+
 ota_update() {
   check_host
   packages_checker
