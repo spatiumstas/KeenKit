@@ -1,5 +1,6 @@
 #!/bin/sh
 
+export LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
@@ -13,7 +14,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.2"
+SCRIPT_VERSION="2.2.1"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -82,11 +83,6 @@ main_menu() {
   fi
 }
 
-rci_request() {
-  local endpoint="$1"
-  curl -s "http://localhost:79/rci/$endpoint"
-}
-
 print_message() {
   local message="$1"
   local color="${2:-$NC}"
@@ -95,19 +91,19 @@ print_message() {
 }
 
 get_device() {
-  rci_request "show/version" | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  ndmc -c show version | grep "device" | awk -F": " '{print $2}' 2>/dev/null
 }
 
 get_fw_version() {
-  rci_request "show/version" | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  ndmc -c show version | grep "title" | awk -F": " '{print $2}' 2>/dev/null
 }
 
 get_device_id() {
-  rci_request "show/version" | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  ndmc -c show version | grep "hw_id" | awk -F": " '{print $2}' 2>/dev/null
 }
 
 get_uptime() {
-  local uptime=$(rci_request "show/system" | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
+  local uptime=$(ndmc -c show system | grep "uptime" | awk '{print $2}' 2>/dev/null)
   local days=$((uptime / 86400))
   local hours=$(((uptime % 86400) / 3600))
   local minutes=$(((uptime % 3600) / 60))
@@ -121,14 +117,14 @@ get_uptime() {
 }
 
 get_ram_usage() {
-  local memory=$(rci_request "show/system" | grep -o '"memory": "[^"]*"' | cut -d'"' -f4 2>/dev/null)
+  local memory=$(ndmc -c show system | grep "memory:" | awk '{print $2}' 2>/dev/null)
   local used=$(echo "$memory" | cut -d'/' -f1)
   local total=$(echo "$memory" | cut -d'/' -f2)
   printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
 }
 
 get_storage() {
-  local storage_info=$(rci_request "ls" | grep -A 10 '"storage:":' | grep -E '"free":|"total":' | awk -F'"' '{print $4}')
+  local storage_info=$(ndmc -c ls | grep -A 10 "name: storage:" | grep -E "free:|total:" | awk '{print $2}')
   local free=$(echo "$storage_info" | head -n1)
   local total=$(echo "$storage_info" | tail -n1)
   local used=$((total - free))
@@ -138,7 +134,7 @@ get_storage() {
 }
 
 get_ram_size() {
-  rci_request "show/system" | grep -o '"memtotal": [0-9]*' | cut -d' ' -f2 | awk '{print int($1 / 1024)}' 2>/dev/null
+  ndmc -c show system | grep "memtotal" | awk '{print int($2 / 1024)}' 2>/dev/null
 }
 
 get_boot_current() {
@@ -162,7 +158,7 @@ get_architecture() {
 }
 
 get_host() {
-  rci_request "show/ndss" | grep -q "127.0.0.1"
+  ndmc -c show ndss | grep -q "127.0.0.1"
 }
 
 check_host() {
@@ -219,13 +215,13 @@ perform_dd() {
   fi
 }
 
-identify_external_drive() {
-  local message=$1
-  local message2=$2
-  local special_message=$3
+select_drive() {
+  local message="$1"
+  local message2="$2"
+  local special_message="$3"
   labels=""
   uuids=""
-  index=1
+  index=2
   media_found=0
   media_output=$(ndmc -c show media)
   current_manufacturer=""
@@ -235,11 +231,13 @@ identify_external_drive() {
     return 1
   fi
 
+  echo "0. Временное хранилище (tmp)"
+  echo "1. Встроенное хранилище $message2"
+
   while IFS= read -r line; do
     case "$line" in
     *"name: Media"*)
       media_found=1
-      echo "0. Встроенное хранилище $message2"
       current_manufacturer=""
       ;;
     *"manufacturer:"*)
@@ -296,35 +294,27 @@ identify_external_drive() {
 $media_output
 EOF
 
-  if [ -z "$labels" ]; then
-    selected_drive="$STORAGE_DIR"
-    if [ "$special_message" = "true" ]; then
-      echo ""
-      read -p "Найдено только встроенное хранилище $message2, продолжить бэкап? (y/n) " item_rc1
-      item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
-      case "$item_rc1" in
-      y | Y) ;;
-      n | N) exit_function ;;
-      *) ;;
-      esac
-    fi
-    return
-  fi
-
   echo ""
   read -p "$message " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   echo ""
-  if [ "$choice" = "0" ]; then
-    selected_drive="$STORAGE_DIR"
-  else
-    selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice]}')
-    if [ -z "$selected_drive" ]; then
-      print_message "Неверный выбор" "$RED"
-      exit_function
-    fi
-    selected_drive="/tmp/mnt/$selected_drive"
-  fi
+  case "$choice" in
+    0) selected_drive="$TMP_DIR" ;;
+    1) selected_drive="$STORAGE_DIR" ;;
+    *)
+      if [ -n "$uuids" ]; then
+        selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice-1]}')
+        if [ -z "$selected_drive" ]; then
+          print_message "Неверный выбор" "$RED"
+          exit_function
+        fi
+        selected_drive="/tmp/mnt/$selected_drive"
+      else
+        print_message "Неверный выбор" "$RED"
+        exit_function
+      fi
+      ;;
+  esac
 }
 
 has_an_external_storage() {
@@ -339,8 +329,8 @@ has_an_external_storage() {
 }
 
 get_country() {
-  output=$(rci_request "show/system/country")
-  country=$(echo "$output" | grep -o '"factory": "[^"]*"' | cut -d'"' -f4)
+  output=$(ndmc -c show system country)
+  country=$(echo "$output" | awk '/factory:/ {print $2}')
 
   if [ "$country" = "RU" ]; then
     return 0
@@ -377,7 +367,7 @@ backup_config() {
     case "$user_input" in
     y | Y)
       echo ""
-      identify_external_drive "Выберите накопитель для бэкапа:"
+      select_drive "Выберите накопитель для бэкапа:"
 
       if [ -n "$selected_drive" ]; then
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
@@ -479,7 +469,7 @@ show_progress() {
 }
 
 get_ota_fw_name() {
-  local FILE=$1
+  local FILE="$1"
   URL=$(url)
   JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$SCRIPT_VERSION\"}"
   curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
@@ -621,6 +611,24 @@ update_firmware_block() {
   fi
 }
 
+find_files() {
+  local search_path="$1"
+  local min_size="$2"
+  local exclude_pattern="$3"
+
+  local find_cmd="find \"$search_path\" -name '*.bin' -size +${min_size}"
+
+  if [ "$search_path" = "$TMP_DIR" ]; then
+    find_cmd="$find_cmd -not -path \"*/mnt/*\""
+  fi
+
+  if [ -n "$exclude_pattern" ]; then
+    find_cmd="$find_cmd -not -path \"$exclude_pattern\""
+  fi
+
+  eval "$find_cmd"
+}
+
 firmware_manual_update() {
   ram_size=$(get_ram_size)
 
@@ -630,12 +638,12 @@ firmware_manual_update() {
     use_mount=true
   else
     output=$(mount)
-    identify_external_drive "Выберите накопитель с размещённым файлом обновления:"
+    select_drive "Выберите накопитель с размещённым файлом обновления:"
     selected_drive="$selected_drive"
     use_mount=false
   fi
 
-  files=$(find "$selected_drive" -name '*.bin' -size +1M)
+  files=$(find_files "$selected_drive" "1M")
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
@@ -688,7 +696,7 @@ firmware_manual_update() {
 
 backup_block() {
   output=$(mount)
-  identify_external_drive "Выберите накопитель для бэкапа:"
+  select_drive "Выберите накопитель для бэкапа:"
   mtd_output=$(cat /proc/mtd)
   printf "${GREEN}Доступные разделы:${NC}\n"
   echo "$mtd_output" | awk 'NR>1 {print $0}'
@@ -769,7 +777,7 @@ backup_block() {
 backup_entware() {
   packages_checker
   output=$(mount)
-  identify_external_drive "Выберите накопитель:" "(может не хватить места)" "true"
+  select_drive "Выберите накопитель:" "(может не хватить места)" "true"
   print_message "Выполняю копирование..." "$CYAN"
 
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
@@ -788,8 +796,8 @@ backup_entware() {
 rewrite_block() {
   check_host
   output=$(mount)
-  identify_external_drive "Выберите накопитель с размещённым файлом:"
-  files=$(find $selected_drive -name '*.bin' -size +60k)
+  select_drive "Выберите накопитель с размещённым файлом:"
+  files=$(find_files "$selected_drive" "60k")
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
     print_message "Файл для замены не найден в выбранном хранилище" "$RED"
