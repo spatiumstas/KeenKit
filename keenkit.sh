@@ -14,7 +14,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.2.1"
+SCRIPT_VERSION="2.2.2"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -299,21 +299,21 @@ EOF
   choice=$(echo "$choice" | tr -d ' \n\r')
   echo ""
   case "$choice" in
-    0) selected_drive="$TMP_DIR" ;;
-    1) selected_drive="$STORAGE_DIR" ;;
-    *)
-      if [ -n "$uuids" ]; then
-        selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice-1]}')
-        if [ -z "$selected_drive" ]; then
-          print_message "Неверный выбор" "$RED"
-          exit_function
-        fi
-        selected_drive="/tmp/mnt/$selected_drive"
-      else
+  0) selected_drive="$TMP_DIR" ;;
+  1) selected_drive="$STORAGE_DIR" ;;
+  *)
+    if [ -n "$uuids" ]; then
+      selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice-1]}')
+      if [ -z "$selected_drive" ]; then
         print_message "Неверный выбор" "$RED"
         exit_function
       fi
-      ;;
+      selected_drive="/tmp/mnt/$selected_drive"
+    else
+      print_message "Неверный выбор" "$RED"
+      exit_function
+    fi
+    ;;
   esac
 }
 
@@ -497,15 +497,29 @@ ota_update() {
     i=$((i + 1))
   done
   exit_main_menu
-  read -p "Выберите модель: " DIR_NUM
-  if [ "$DIR_NUM" = "00" ]; then
-    main_menu
-  fi
+  dir_count=$(echo "$DIRS" | wc -l)
+  while true; do
+    read -p "Выберите модель (от 1 до $dir_count): " DIR_NUM
+    if [ "$DIR_NUM" = "00" ]; then
+      unset FILE
+      unset DOWNLOAD_PATH
+      unset use_mount
+      unset progress_pid
+      main_menu
+      return
+    fi
+    if echo "$DIR_NUM" | grep -qE '^[0-9]+$' && [ "$DIR_NUM" -ge 1 ] && [ "$DIR_NUM" -le "$dir_count" ]; then
+      break
+    else
+      print_message "Неверный выбор. Выберите от 1 до $dir_count." "$RED"
+    fi
+  done
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
 
   BIN_FILES=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
+    exit_function
   else
     printf "\nПрошивки для $DIR:\n"
     i=1
@@ -514,11 +528,29 @@ ota_update() {
       i=$((i + 1))
     done
     exit_main_menu
-    read -p "Выберите прошивку: " FILE_NUM
-    if [ "$FILE_NUM" = "00" ]; then
-      main_menu
-    fi
+    file_count=$(echo "$BIN_FILES" | wc -l)
+    while true; do
+      read -p "Выберите прошивку ( от 1 до $file_count): " FILE_NUM
+      if [ "$FILE_NUM" = "00" ]; then
+        unset FILE
+        unset DOWNLOAD_PATH
+        unset use_mount
+        unset progress_pid
+        main_menu
+        return
+      fi
+      if echo "$FILE_NUM" | grep -qE '^[0-9]+$' && [ "$FILE_NUM" -ge 1 ] && [ "$FILE_NUM" -le "$file_count" ]; then
+        break
+      else
+        print_message "Неверный выбор. Выберите от 1 до $file_count." "$RED"
+      fi
+    done
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
+
+    if [ -z "$FILE" ]; then
+      print_message "Файл не выбран" "$RED"
+      exit_function
+    fi
 
     ram_size=$(get_ram_size)
     if [ "$ram_size" -lt $MIN_RAM_SIZE ]; then
@@ -541,7 +573,7 @@ ota_update() {
     wait $progress_pid
     if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
-      read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+      exit_function
     fi
 
     curl -L -s "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
@@ -550,11 +582,11 @@ ota_update() {
     FILE_MD5SUM=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
     if [ "$MD5SUM" != "$FILE_MD5SUM" ]; then
-      printf "${RED}MD5 хеш не совпадает.${NC}"
+      printf "${RED}MD5 хеш не совпадает.${NC}\n"
       echo "Ожидаемый: $MD5SUM"
       echo "Фактический: $FILE_MD5SUM"
       rm -f "$DOWNLOAD_PATH/$FILE"
-      return
+      exit_function
     fi
 
     printf "${GREEN}MD5 хеш совпадает${NC}\n\n"
@@ -576,7 +608,6 @@ ota_update() {
     print_message "Перезагружаю устройство..." "${CYAN}"
     sleep 1
     reboot
-    main_menu
   fi
 }
 
