@@ -333,7 +333,7 @@ get_country() {
   country=$(echo "$output" | awk '/factory:/ {print $2}')
 
   if [ "$country" = "RU" ]; then
-    return 0
+    return 1
   else
     return 1
   fi
@@ -578,19 +578,19 @@ ota_update() {
 
     curl -L -s "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
 
-    MD5SUM=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-    FILE_MD5SUM=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    MD5SUM_REMOTE=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    MD5SUM_LOCAL=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
-    if [ "$MD5SUM" != "$FILE_MD5SUM" ]; then
+    if [ "$MD5SUM_REMOTE" != "$MD5SUM_LOCAL" ]; then
       printf "${RED}MD5 хеш не совпадает.${NC}\n"
-      echo "Ожидаемый: $MD5SUM"
-      echo "Фактический: $FILE_MD5SUM"
+      echo "Ожидаемый: $MD5SUM_REMOTE"
+      echo "Фактический: $MD5SUM_LOCAL"
       rm -f "$DOWNLOAD_PATH/$FILE"
+      rm -f "$DOWNLOAD_PATH/md5sum"
       exit_function
     fi
 
     printf "${GREEN}MD5 хеш совпадает${NC}\n\n"
-    rm -f "$DOWNLOAD_PATH/md5sum"
     read -p "$(printf "Выбран ${GREEN}$FILE${NC} для обновления, всё верно? (y/n) ")" CONFIRM
     case "$CONFIRM" in
     y | Y)
