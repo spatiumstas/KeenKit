@@ -14,7 +14,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.2.2"
+SCRIPT_VERSION="2.3"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -30,8 +30,8 @@ print_menu() {
  |_|\_\___|\___|_| |_|_|\_\_|\__|
 
 EOF
-  printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_architecture)"
-  printf "${RED}Версия ОС:      ${NC}%s\n" "$(get_fw_version) | Слот: "$(get_boot_current)""
+  printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_fw_version) (слот: "$(get_boot_current)")"
+  printf "${RED}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($(get_architecture)) | $(get_temperature)"
   printf "${RED}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
   printf "${RED}Хранилище:      ${NC}%s\n" "$(get_storage)"
   printf "${RED}Время работы:   ${NC}%s\n" "$(get_uptime)"
@@ -146,19 +146,61 @@ get_ndm_storage() {
 }
 
 get_architecture() {
-  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3|armv7' | head -n 1)
+  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
 
   case "$arch" in
   "mips-3") echo "mips" ;;
   "mipsel-3") echo "mipsel" ;;
   "aarch64-3") echo "aarch64" ;;
-  "armv7") echo "armv7" ;;
   *) echo "unknown_arch" ;;
   esac
 }
 
 get_host() {
   ndmc -c show ndss | grep -q "127.0.0.1"
+}
+
+get_radio_temp() {
+  ndmc -c "show interface $1" | awk -F': ' '/temperature:/ {print $2}' 2>/dev/null
+}
+
+get_temperature() {
+  temp_2=$(get_radio_temp WifiMaster0)
+  temp_5=$(get_radio_temp WifiMaster1)
+  arch=$(get_architecture)
+  temp_cpu=""
+  cpu_str=""
+
+  if [ "$arch" = "aarch64" ]; then
+    temp_cpu_raw=$(ndmc -c "more sys:/devices/virtual/thermal/thermal_zone0/temp" 2>/dev/null | tr -d -c '0-9')
+    if [ -n "$temp_cpu_raw" ]; then
+      temp_cpu=$((temp_cpu_raw / 1000))
+      cpu_str=" | CPU: ${temp_cpu}°C"
+    fi
+  fi
+
+  if echo "$temp_2" | grep -qE '^[0-9]+$' && echo "$temp_5" | grep -qE '^[0-9]+$'; then
+    diff=$((temp_5 - temp_2))
+    [ $diff -lt 0 ] && diff=$((-diff))
+    if [ $diff -lt 3 ]; then
+      echo "Wi-Fi: ${temp_5}°C${cpu_str}"
+      return
+    fi
+  fi
+
+  echo "2.4GHz: ${temp_2}°C | 5GHz: ${temp_5}°C${cpu_str}"
+}
+
+get_cpu_model() {
+  cpu_list="EN75[0-9A-Za-z]* MT76[0-9A-Za-z]* MT79[0-9A-Za-z]*"
+  for pattern in $cpu_list; do
+    found=$(strings /lib/libndmMwsController.so 2>/dev/null | grep -oE "$pattern" | head -n 1)
+    if [ -n "$found" ]; then
+      echo "$found"
+      return
+    fi
+  done
+  echo "Unknown"
 }
 
 check_host() {
@@ -530,7 +572,7 @@ ota_update() {
     exit_main_menu
     file_count=$(echo "$BIN_FILES" | wc -l)
     while true; do
-      read -p "Выберите прошивку ( от 1 до $file_count): " FILE_NUM
+      read -p "Выберите прошивку (от 1 до $file_count): " FILE_NUM
       if [ "$FILE_NUM" = "00" ]; then
         unset FILE
         unset DOWNLOAD_PATH
