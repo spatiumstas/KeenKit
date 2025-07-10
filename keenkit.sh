@@ -43,9 +43,6 @@ EOF
     echo "4. Заменить раздел"
     echo "5. OTA Update"
     echo "6. Заменить сервисные данные"
-    if get_country; then
-      printf "${RED}7. Сменить регион${NC}\n"
-    fi
   fi
   printf "\n88. Удалить используемые пакеты\n"
   echo "99. Обновить скрипт"
@@ -70,6 +67,7 @@ main_menu() {
     5) ota_update ;;
     6) service_data_generator ;;
     7) change_country ;;
+    8) change_server ;;
     00) exit ;;
     88) packages_delete ;;
     99) script_update "main" ;;
@@ -156,10 +154,6 @@ get_architecture() {
   esac
 }
 
-get_host() {
-  ndmc -c show ndss | grep -q "127.0.0.1"
-}
-
 get_radio_temp() {
   ndmc -c "show interface $1" | awk -F': ' '/temperature:/ {print $2}' 2>/dev/null
 }
@@ -201,6 +195,21 @@ get_cpu_model() {
     fi
   done
   echo "Unknown"
+}
+
+get_country() {
+  output=$(ndmc -c show system country)
+  country=$(echo "$output" | awk '/factory:/ {print $2}')
+
+  if [ "$country" = "RU" ]; then
+    return 1
+  else
+    return 1
+  fi
+}
+
+get_host() {
+  ndmc -c show ndss | grep -q "127.0.0.1"
 }
 
 check_host() {
@@ -253,6 +262,7 @@ perform_dd() {
 
   if echo "$output" | grep -iq "error\|can't"; then
     print_message "Ошибка при перезаписи раздела" "$RED"
+    umountFS
     exit_function
   fi
 }
@@ -370,26 +380,34 @@ has_an_external_storage() {
   return 1
 }
 
-get_country() {
-  output=$(ndmc -c show system country)
-  country=$(echo "$output" | awk '/factory:/ {print $2}')
-
-  if [ "$country" = "RU" ]; then
-    return 1
-  else
-    return 1
-  fi
-}
-
 change_country() {
   if get_country; then
     print_message "Регион роутера RU, необходимо изменить на EA" "$CYAN"
-    read -p "Изменить регион? (y/n) " user_input
+    read -p "Изменить страну? (y/n) " user_input
     user_input=$(echo "$user_input" | tr -d ' \n\r')
     echo ""
     case "$user_input" in
     y | Y)
       service_data_generator "country"
+      ;;
+    n | N)
+      echo ""
+      ;;
+    *) ;;
+    esac
+  fi
+  main_menu
+}
+
+change_server() {
+  if ! get_host; then
+    print_message "Регион работы роутера будет изменён EU ↔ EA. Продолжая, вы принимаете на себя всю ответственность" "$RED"
+    read -p "Изменить регион? (y/n) " user_input
+    user_input=$(echo "$user_input" | tr -d ' \n\r')
+    echo ""
+    case "$user_input" in
+    y | Y)
+      service_data_generator "server"
       ;;
     n | N)
       echo ""
@@ -962,7 +980,6 @@ rewrite_block() {
 }
 
 service_data_generator() {
-  check_host
   folder_path="$OPT_DIR/backup$DATE"
   SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
@@ -1028,21 +1045,18 @@ service_data_generator() {
     fi
     ;;
   esac
-  if [ -z "$target_flag" ]; then
-    read -p "Перезагрузить роутер? (y/n) " item_rc2
-    item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
-    case "$item_rc2" in
-    y | Y)
-      echo ""
-      reboot
-      ;;
-    n | N)
-      echo ""
-      ;;
-    *) ;;
-    esac
-    exit_function
-  fi
+  read -p "Перезагрузить роутер? (y/n) " item_rc2
+  item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
+  case "$item_rc2" in
+  y | Y)
+    echo ""
+    reboot
+    ;;
+  n | N)
+    echo ""
+    ;;
+  *) ;;
+  esac
   exit_function
 }
 
