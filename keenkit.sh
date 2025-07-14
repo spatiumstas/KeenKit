@@ -496,7 +496,7 @@ url() {
 post_update() {
   URL=$(url)
   JSON_DATA="{\"script_update\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s --fail --max-time 2 --retry 0
   main_menu
 }
 
@@ -539,7 +539,7 @@ get_ota_fw_name() {
   local FILE="$1"
   URL=$(url)
   JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s
+  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s --fail --max-time 2 --retry 0
 }
 
 ota_update() {
@@ -661,8 +661,8 @@ ota_update() {
     read -p "$(printf "Выбран ${GREEN}$FILE${NC} для обновления, всё верно? (y/n) ")" CONFIRM
     case "$CONFIRM" in
     y | Y)
-      get_ota_fw_name "$FILE"
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
+      get_ota_fw_name "$FILE"
       print_message "Прошивка успешно обновлена" "$GREEN"
       ;;
     n | N)
