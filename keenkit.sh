@@ -219,9 +219,16 @@ check_host() {
 }
 
 packages_checker() {
-  if ! opkg list-installed | grep -q "^curl" || ! opkg list-installed | grep -q "^tar"; then
-    print_message "Устанавливаем curl/tar..." "$GREEN"
-    opkg update && opkg install curl tar
+  local missing=""
+  for pkg in "$@"; do
+    if ! opkg list-installed | grep -q "^$pkg"; then
+      missing="$missing $pkg"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    print_message "Устанавливаем:$missing" "$GREEN"
+    opkg update >/dev/null 2>&1
+    opkg install $missing --nodeps
     echo ""
   fi
 }
@@ -537,7 +544,7 @@ get_ota_fw_name() {
 
 ota_update() {
   check_host
-  packages_checker
+  packages_checker curl findutils
   internet_checker
   REQUEST=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/")
   DIRS=$(echo "$REQUEST" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
@@ -721,6 +728,7 @@ find_files() {
 }
 
 firmware_manual_update() {
+  packages_checker findutils
   ram_size=$(get_ram_size)
 
   if [ "$ram_size" -lt $MIN_RAM_SIZE ]; then
@@ -843,10 +851,6 @@ backup_block() {
       echo ""
       if ! dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" 2>&1; then
         error_occurred=1
-        print_message "Ошибка: Недостаточно места для сохранения mtd$part.$selected_mtd.bin" "$RED"
-        echo ""
-        read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-        break
       fi
       echo ""
     done
@@ -860,13 +864,13 @@ backup_block() {
   if [ "$error_occurred" -eq 0 ] && [ $valid_parts -eq 1 ]; then
     print_message "Успешно сохранено в $folder_path" "$GREEN"
   else
-    print_message "Ошибки при сохранении. Проверьте вывод выше." "$RED"
+    print_message "Ошибка при сохранении. Проверьте вывод выше." "$RED"
   fi
   exit_function
 }
 
 backup_entware() {
-  packages_checker
+  packages_checker tar
   output=$(mount)
   select_drive "Выберите накопитель:" "(может не хватить места)" "true"
   print_message "Выполняю копирование..." "$CYAN"
@@ -983,20 +987,7 @@ service_data_generator() {
   folder_path="$OPT_DIR/backup$DATE"
   SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
-
-  internet_checker && opkg update && echo "" && {
-    output=$(opkg install curl python3-base python3 python3-light libpython3 --nodeps 2>&1) || {
-      print_message "Ошибка при установке:" "$RED" >&2
-      echo "$output" >&2
-      exit_function
-    }
-
-    if echo "$output" | grep -q "error"; then
-      print_message "Обнаружена ошибка в выводе:" "$RED" >&2
-      echo "$output" >&2
-      exit_function
-    fi
-  }
+  packages_checker curl python3-base python3 python3-light libpython3 findutils
 
   curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ]; then
