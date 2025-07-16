@@ -14,7 +14,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.3"
+SCRIPT_VERSION="2.3.1"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -219,16 +219,20 @@ check_host() {
 }
 
 packages_checker() {
+  local packages="$1"
+  local flag="$2"
   local missing=""
-  for pkg in "$@"; do
+
+  for pkg in $packages; do
     if ! opkg list-installed | grep -q "^$pkg"; then
       missing="$missing $pkg"
     fi
   done
+
   if [ -n "$missing" ]; then
     print_message "Устанавливаем:$missing" "$GREEN"
     opkg update >/dev/null 2>&1
-    opkg install $missing --nodeps
+    opkg install $missing $flag
     echo ""
   fi
 }
@@ -470,6 +474,7 @@ exit_main_menu() {
 }
 
 script_update() {
+  packages_checker "curl"
   BRANCH="$1"
   curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
@@ -544,7 +549,7 @@ get_ota_fw_name() {
 
 ota_update() {
   check_host
-  packages_checker curl findutils
+  packages_checker "curl findutils"
   internet_checker
   REQUEST=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/")
   DIRS=$(echo "$REQUEST" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
@@ -728,7 +733,7 @@ find_files() {
 }
 
 firmware_manual_update() {
-  packages_checker findutils
+  packages_checker "findutils"
   ram_size=$(get_ram_size)
 
   if [ "$ram_size" -lt $MIN_RAM_SIZE ]; then
@@ -870,7 +875,7 @@ backup_block() {
 }
 
 backup_entware() {
-  packages_checker tar
+  packages_checker "tar"
   output=$(mount)
   select_drive "Выберите накопитель:" "(может не хватить места)" "true"
   print_message "Выполняю копирование..." "$CYAN"
@@ -987,7 +992,7 @@ service_data_generator() {
   folder_path="$OPT_DIR/backup$DATE"
   SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
   target_flag=$1
-  packages_checker curl python3-base python3 python3-light libpython3 findutils
+  packages_checker "curl python3-base python3 python3-light libpython3 findutils" "--nodeps"
 
   curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ]; then
