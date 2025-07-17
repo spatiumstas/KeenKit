@@ -32,6 +32,9 @@ print_menu() {
 EOF
   printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_fw_version) (слот: "$(get_boot_current)")"
   printf "${RED}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($(get_architecture)) | $(get_temperature)"
+  if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
+    printf "${RED}Модем:          ${NC}%s\n" "$get_modem_info"
+  fi
   printf "${RED}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
   printf "${RED}Хранилище:      ${NC}%s\n" "$(get_storage)"
   printf "${RED}Время работы:   ${NC}%s\n" "$(get_uptime)"
@@ -195,6 +198,34 @@ get_cpu_model() {
     fi
   done
   echo "Unknown"
+}
+
+get_modem() {
+  interfaces_list=$(ndmc -c show interface | grep -A 4 -E "UsbQmi[0-9]*|UsbLte[0-9]*" | grep "id:" | awk '{print $2}')
+  [ -z "$interfaces_list" ] && return
+  result=""
+  first=1
+  pad="                  "
+  for iface in $interfaces_list; do
+    info=$(ndmc -c show interface "$iface")
+    product=$(echo "$info" | awk -F': ' '/product:/ {print $2; exit}')
+    temperature=$(echo "$info" | awk -F': ' '/temperature:/ {print $2; exit}')
+    bands=$(echo "$info" | awk '
+      /carrier, id =/ {in_carrier=1; band=""; bw=""; if (count++) printf " + "; next}
+      in_carrier && /band:/ {band=$2}
+      in_carrier && /bandwidth:/ {bw=$2; in_carrier=0; if(band && bw) {printf "B%s@%s МГц", band, bw}}
+    ')
+    modem_str="$product"
+    [ -n "$bands" ] && modem_str="$modem_str | $bands"
+    [ -n "$temperature" ] && modem_str="$modem_str | ${temperature}°C"
+    if [ $first -eq 1 ]; then
+      result="$modem_str"
+      first=0
+    else
+      result="$result\n$pad$modem_str"
+    fi
+  done
+  echo -e "$result"
 }
 
 get_country() {
