@@ -30,15 +30,15 @@ print_menu() {
  |_|\_\___|\___|_| |_|_|\_\_|\__|
 
 EOF
-  printf "${RED}Модель:         ${NC}%s\n" "$(get_device) | $(get_fw_version) (слот: "$(get_boot_current)")"
-  printf "${RED}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($(get_architecture)) | $(get_temperature)"
+  printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device) | $(get_fw_version) (слот: "$(get_boot_current)")"
+  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($(get_architecture)) | $(get_temperature)"
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
-    printf "${RED}Модем:          ${NC}%s\n" "$get_modem_info"
+    printf "${CYAN}Модем:          ${NC}%s\n" "$get_modem_info"
   fi
-  printf "${RED}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
-  printf "${RED}Хранилище:      ${NC}%s\n" "$(get_storage)"
-  printf "${RED}Время работы:   ${NC}%s\n" "$(get_uptime)"
-  printf "${RED}Версия скрипта: ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
+  printf "${CYAN}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
+  printf "${CYAN}OPKG:           ${NC}%s\n" "$(get_opkg_storage)"
+  printf "${CYAN}Время работы:   ${NC}%s\n" "$(get_uptime)"
+  printf "${CYAN}Версия:         ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
   echo "3. Бэкап Entware"
@@ -124,14 +124,66 @@ get_ram_usage() {
   printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
 }
 
-get_storage() {
-  local storage_info=$(ndmc -c ls | grep -A 10 "name: storage:" | grep -E "free:|total:" | awk '{print $2}')
-  local free=$(echo "$storage_info" | head -n1)
-  local total=$(echo "$storage_info" | tail -n1)
-  local used=$((total - free))
+format_size() {
+  local used=$1
+  local total=$2
   local used_mb=$((used / 1024 / 1024))
   local total_mb=$((total / 1024 / 1024))
-  printf "%d / %d MB\n" "$used_mb" "$total_mb"
+  if [ "$total_mb" -ge 1024 ]; then
+    printf "%d / %d GB" $((used_mb / 1024)) $((total_mb / 1024))
+  else
+    printf "%d / %d MB" $used_mb $total_mb
+  fi
+}
+
+get_opkg_storage() {
+  local opkg_label
+  opkg_label=$(ndmc -c show sc opkg disk | awk -F': ' '/disk:/ {print $2}' | tr -d '\n\r' | sed 's/^[ \t:\/]*//;s/[ \t:\/]*$//')
+
+  if [ "$opkg_label" = "storage" ]; then
+    local storage_info free total used
+    storage_info=$(ndmc -c ls | grep -A 10 "name: storage:" | grep -E "free:|total:" | awk '{print $2}')
+    free=$(echo "$storage_info" | head -n1)
+    total=$(echo "$storage_info" | tail -n1)
+    used=$((total - free))
+    echo "$(format_size $used $total)"
+    return
+  fi
+
+  local media_output label free total in_partition=0 found=0
+  media_output=$(ndmc -c show media)
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *partition:*)
+        in_partition=1
+        label="" free="" total=""
+        ;;
+      *label:*)
+        [ $in_partition -eq 1 ] && label=$(echo "$line" | awk -F': ' '{print $2}')
+        ;;
+      *free:*)
+        [ $in_partition -eq 1 ] && free=$(echo "$line" | awk -F': ' '{print $2}')
+        ;;
+      *total:*)
+        [ $in_partition -eq 1 ] && total=$(echo "$line" | awk -F': ' '{print $2}')
+        ;;
+      "")
+        if [ $in_partition -eq 1 ]; then
+          local label_clean=$(echo "$label" | sed 's/^[ \t]*//;s/[ \t:\/]*$//')
+          if [ "$label_clean" = "$opkg_label" ]; then
+            local used=$((total - free))
+            echo "$(format_size $used $total)"
+            found=1
+            break
+          fi
+        fi
+        in_partition=0
+        ;;
+    esac
+  done <<EOF
+$media_output
+EOF
+  [ $found -eq 0 ]
 }
 
 get_ram_size() {
@@ -352,22 +404,13 @@ select_drive() {
 
         label=$(echo "$label_line" | cut -d ':' -f2- | sed 's/^ *//g')
         fstype=$(echo "$fstype_line" | cut -d ':' -f2- | sed 's/^ *//g')
+        total_bytes=$(echo "$total_line" | cut -d ':' -f2- | sed 's/^ *//g')
         free_bytes=$(echo "$free_line" | cut -d ':' -f2- | sed 's/^ *//g')
+        used_bytes=$((total_bytes - free_bytes))
 
         if [ "$fstype" = "swap" ]; then
           uuid=""
           continue
-        fi
-
-        free_mb=$((free_bytes / 1024 / 1024))
-        free_gb=$((free_mb / 1024))
-
-        if [ "$free_mb" -lt 1024 ]; then
-          free_display="$free_mb"
-          unit="MB"
-        else
-          free_display="$free_gb"
-          unit="GB"
         fi
 
         if [ -n "$label" ]; then
@@ -378,7 +421,7 @@ select_drive() {
           display_name="Unknown"
         fi
 
-        echo "$index. $display_name ($(echo "$fstype" | tr '[:lower:]' '[:upper:]'), ${free_display}${unit})"
+        echo "$index. $display_name ($(echo "$fstype" | tr '[:lower:]' '[:upper:]'), $(format_size $used_bytes $total_bytes))"
         labels="$labels \"$display_name\""
         uuids="$uuids $uuid"
         index=$((index + 1))
