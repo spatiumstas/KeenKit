@@ -208,6 +208,8 @@ get_modem() {
   pad="                  "
   for iface in $interfaces_list; do
     info=$(ndmc -c show interface "$iface")
+    plugged=$(echo "$info" | awk -F': ' '/plugged:/ {print $2; exit}')
+    [ "$plugged" = "no" ] && continue
     product=$(echo "$info" | awk -F': ' '/product:/ {print $2; exit}')
     temperature=$(echo "$info" | awk -F': ' '/temperature:/ {print $2; exit}')
     bands=$(echo "$info" | awk '
