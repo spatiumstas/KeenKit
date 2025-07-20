@@ -1,5 +1,5 @@
 #!/bin/sh
-
+trap cleanup INT TERM EXIT
 export LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
 RED='\033[1;31m'
 GREEN='\033[1;32m'
@@ -14,7 +14,7 @@ OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.3.1"
+SCRIPT_VERSION="2.3.2"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -30,7 +30,7 @@ print_menu() {
  |_|\_\___|\___|_| |_|_|\_\_|\__|
 
 EOF
-  printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device) | $(get_fw_version) (слот: "$(get_boot_current)")"
+  printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (слот: "$(get_boot_current)")"
   printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($(get_architecture)) | $(get_temperature)"
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
     printf "${CYAN}Модем:          ${NC}%s\n" "$get_modem_info"
@@ -91,20 +91,25 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
+rci_request() {
+  local endpoint="$1"
+  curl -s "http://localhost:79/rci/$endpoint"
+}
+
 get_device() {
-  ndmc -c show version | grep "device" | awk -F": " '{print $2}' 2>/dev/null
+  rci_request "show/version" | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_fw_version() {
-  ndmc -c show version | grep "title" | awk -F": " '{print $2}' 2>/dev/null
+  rci_request "show/version" | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
-get_device_id() {
-  ndmc -c show version | grep "hw_id" | awk -F": " '{print $2}' 2>/dev/null
+get_hw_id() {
+  rci_request "show/version" | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_uptime() {
-  local uptime=$(ndmc -c show system | grep "uptime" | awk '{print $2}' 2>/dev/null)
+  local uptime=$(rci_request "show/system" | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
   local days=$((uptime / 86400))
   local hours=$(((uptime % 86400) / 3600))
   local minutes=$(((uptime % 3600) / 60))
@@ -118,7 +123,7 @@ get_uptime() {
 }
 
 get_ram_usage() {
-  local memory=$(ndmc -c show system | grep "memory:" | awk '{print $2}' 2>/dev/null)
+  local memory=$(rci_request "show/system" | grep -o '"memory": "[^"]*"' | cut -d'"' -f4 2>/dev/null)
   local used=$(echo "$memory" | cut -d'/' -f1)
   local total=$(echo "$memory" | cut -d'/' -f2)
   printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
@@ -130,7 +135,13 @@ format_size() {
   local used_mb=$((used / 1024 / 1024))
   local total_mb=$((total / 1024 / 1024))
   if [ "$total_mb" -ge 1024 ]; then
-    printf "%d / %d GB" $((used_mb / 1024)) $((total_mb / 1024))
+    total_gb=$((total / 1024 / 1024 / 1024))
+    if [ "$used_mb" -lt 1024 ]; then
+      printf "%d MB / %d GB" $used_mb $total_gb
+    else
+      used_gb=$((used / 1024 / 1024 / 1024))
+      printf "%d / %d GB" $used_gb $total_gb
+    fi
   else
     printf "%d / %d MB" $used_mb $total_mb
   fi
@@ -138,56 +149,51 @@ format_size() {
 
 get_opkg_storage() {
   local opkg_label
-  opkg_label=$(ndmc -c show sc opkg disk | awk -F': ' '/disk:/ {print $2}' | tr -d '\n\r' | sed 's/^[ \t:\/]*//;s/[ \t:\/]*$//')
+  opkg_label=$(rci_request "show/sc/opkg/disk" | grep -o '"disk": *"[^\"]*"' | cut -d'"' -f4 | sed 's,/$,,;s,:$,,')
+  local ls_json
+  ls_json=$(rci_request "ls")
+  local free total
 
-  if [ "$opkg_label" = "storage" ]; then
-    local storage_info free total used
-    storage_info=$(ndmc -c ls | grep -A 10 "name: storage:" | grep -E "free:|total:" | awk '{print $2}')
-    free=$(echo "$storage_info" | head -n1)
-    total=$(echo "$storage_info" | tail -n1)
+  free=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"free":' | head -1 | grep -o '[0-9]\+')
+  total=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"total":' | head -1 | grep -o '[0-9]\+')
+
+  if [ -n "$free" ] && [ -n "$total" ]; then
     used=$((total - free))
     echo "$(format_size $used $total)"
     return
   fi
 
-  local media_output label free total in_partition=0 found=0
-  media_output=$(ndmc -c show media)
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      *partition:*)
-        in_partition=1
-        label="" free="" total=""
-        ;;
-      *label:*)
-        [ $in_partition -eq 1 ] && label=$(echo "$line" | awk -F': ' '{print $2}')
-        ;;
-      *free:*)
-        [ $in_partition -eq 1 ] && free=$(echo "$line" | awk -F': ' '{print $2}')
-        ;;
-      *total:*)
-        [ $in_partition -eq 1 ] && total=$(echo "$line" | awk -F': ' '{print $2}')
-        ;;
-      "")
-        if [ $in_partition -eq 1 ]; then
-          local label_clean=$(echo "$label" | sed 's/^[ \t]*//;s/[ \t:\/]*$//')
-          if [ "$label_clean" = "$opkg_label" ]; then
-            local used=$((total - free))
-            echo "$(format_size $used $total)"
-            found=1
-            break
-          fi
-        fi
-        in_partition=0
-        ;;
-    esac
-  done <<EOF
-$media_output
-EOF
-  [ $found -eq 0 ]
+  echo "$ls_json" | grep -o '"[A-Za-z0-9 _-]\{3,\}:"' | while read -r entry; do
+    entry_name=$(echo "$entry" | tr -d '"')
+    block=$(echo "$ls_json" | grep -A10 "\"$entry_name\"" )
+    is_usb=$(echo "$block" | grep '"storage": *"usb"')
+    is_mounted=$(echo "$block" | grep '"mounted": *"yes"')
+    if [ -n "$is_usb" ] && [ -n "$is_mounted" ]; then
+      free=$(echo "$block" | grep '"free":' | head -1 | grep -o '[0-9]\+')
+      total=$(echo "$block" | grep '"total":' | head -1 | grep -o '[0-9]\+')
+      if [ -n "$free" ] && [ -n "$total" ]; then
+        used=$((total - free))
+        echo "$(format_size $used $total)"
+        exit 0
+      fi
+    fi
+  done
+}
+
+get_internal_storage_size() {
+  local ls_json
+  ls_json=$(rci_request "ls")
+  local free total
+  free=$(echo "$ls_json" | grep -A10 '"storage:"' | grep '"free":' | head -1 | grep -o '[0-9]\+')
+  total=$(echo "$ls_json" | grep -A10 '"storage:"' | grep '"total":' | head -1 | grep -o '[0-9]\+')
+  if [ -n "$free" ] && [ -n "$total" ]; then
+    used=$((total - free))
+    format_size $used $total
+  fi
 }
 
 get_ram_size() {
-  ndmc -c show system | grep "memtotal" | awk '{print int($2 / 1024)}' 2>/dev/null
+  rci_request "show/system" | grep -o '"memtotal": [0-9]*' | cut -d' ' -f2 | awk '{print int($1 / 1024)}' 2>/dev/null
 }
 
 get_boot_current() {
@@ -210,7 +216,7 @@ get_architecture() {
 }
 
 get_radio_temp() {
-  ndmc -c "show interface $1" | awk -F': ' '/temperature:/ {print $2}' 2>/dev/null
+  rci_request "show/interface/$1" | grep -o '"temperature": *[0-9]*' | grep -o '[0-9]*' | head -n1
 }
 
 get_temperature() {
@@ -221,10 +227,10 @@ get_temperature() {
   cpu_str=""
 
   if [ "$arch" = "aarch64" ]; then
-    temp_cpu_raw=$(ndmc -c "more sys:/devices/virtual/thermal/thermal_zone0/temp" 2>/dev/null | tr -d -c '0-9')
-    if [ -n "$temp_cpu_raw" ]; then
-      temp_cpu=$((temp_cpu_raw / 1000))
-      cpu_str=" | CPU: ${temp_cpu}°C"
+      temp_cpu_raw=$(cat /sys/devices/virtual/thermal/thermal_zone0/temp | tr -d -c '0-9')
+      if [ -n "$temp_cpu_raw" ]; then
+        temp_cpu=$((temp_cpu_raw / 1000))
+        cpu_str=" | CPU: ${temp_cpu}°C"
     fi
   fi
 
@@ -236,7 +242,6 @@ get_temperature() {
       return
     fi
   fi
-
   echo "2.4GHz: ${temp_2}°C | 5GHz: ${temp_5}°C${cpu_str}"
 }
 
@@ -264,26 +269,34 @@ get_modem() {
     [ "$plugged" = "no" ] && continue
     product=$(echo "$info" | awk -F': ' '/product:/ {print $2; exit}')
     temperature=$(echo "$info" | awk -F': ' '/temperature:/ {print $2; exit}')
-    bands=$(echo "$info" | awk '
+    carrier=$(echo "$info" | awk '
       /carrier, id =/ {in_carrier=1; band=""; bw=""; if (count++) printf " + "; next}
       in_carrier && /band:/ {band=$2}
-      in_carrier && /bandwidth:/ {bw=$2; in_carrier=0; if(band && bw) {printf "B%s@%s МГц", band, bw}}
+      in_carrier && /bandwidth:/ {bw=$2; in_carrier=0; if(band) {printf "B%s", band; if(bw) printf "@%s МГц", bw}}
     ')
-    modem_str="$product"
-    [ -n "$bands" ] && modem_str="$modem_str | $bands"
-    [ -n "$temperature" ] && modem_str="$modem_str | ${temperature}°C"
+    if [ -z "$carrier" ]; then
+      band=$(echo "$info" | awk -F': ' '/band:/ {print $2; exit}')
+      bandwidth=$(echo "$info" | awk -F': ' '/bandwidth:/ {print $2; exit}')
+      if [ -n "$band" ]; then
+        carrier="B${band}"
+        [ -n "$bandwidth" ] && carrier="${carrier}@${bandwidth} МГц"
+      fi
+    fi
+    modem_name="$product"
+    [ -n "$carrier" ] && modem_name="$modem_name | $carrier"
+    [ -n "$temperature" ] && modem_name="$modem_name | ${temperature}°C"
     if [ $first -eq 1 ]; then
-      result="$modem_str"
+      result="$modem_name"
       first=0
     else
-      result="$result\n$pad$modem_str"
+      result="$result\n$pad$modem_name"
     fi
   done
   echo -e "$result"
 }
 
 get_country() {
-  output=$(ndmc -c show system country)
+  output=$(rci_request "show/system/country")
   country=$(echo "$output" | awk '/factory:/ {print $2}')
 
   if [ "$country" = "RU" ]; then
@@ -294,7 +307,7 @@ get_country() {
 }
 
 get_host() {
-  ndmc -c show ndss | grep -q "127.0.0.1"
+  rci_request "show/ndss" | grep -q "127.0.0.1"
 }
 
 check_host() {
@@ -365,8 +378,6 @@ perform_dd() {
 
 select_drive() {
   local message="$1"
-  local message2="$2"
-  local special_message="$3"
   labels=""
   uuids=""
   index=2
@@ -380,7 +391,7 @@ select_drive() {
   fi
 
   echo "0. Временное хранилище (tmp)"
-  echo "1. Встроенное хранилище $message2"
+  echo "1. Встроенное хранилище ($(get_internal_storage_size))"
 
   while IFS= read -r line; do
     case "$line" in
@@ -519,7 +530,7 @@ backup_config() {
       if [ -n "$selected_drive" ]; then
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
         local folder_path="$device_uuid:/backup$DATE"
-        local backup_file="$folder_path/$(get_device_id)_$(get_fw_version)_startup-config.txt"
+        local backup_file="$folder_path/$(get_hw_id)_$(get_fw_version)_startup-config.txt"
         mkdir -p "$selected_drive/backup$DATE"
         ndmc -c "copy startup-config $backup_file"
 
@@ -953,7 +964,7 @@ backup_block() {
 backup_entware() {
   packages_checker "tar"
   output=$(mount)
-  select_drive "Выберите накопитель:" "(может не хватить места)" "true"
+  select_drive "Выберите накопитель:"
   print_message "Выполняю копирование..." "$CYAN"
 
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
@@ -1130,6 +1141,11 @@ service_data_generator() {
   *) ;;
   esac
   exit_function
+}
+
+cleanup() {
+  pkill -P $$ 2>/dev/null
+  exit 0
 }
 
 if [ "$1" = "script_update" ]; then
