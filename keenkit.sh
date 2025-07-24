@@ -165,7 +165,7 @@ get_opkg_storage() {
 
   echo "$ls_json" | grep -o '"[A-Za-z0-9 _-]\{3,\}:"' | while read -r entry; do
     entry_name=$(echo "$entry" | tr -d '"')
-    block=$(echo "$ls_json" | grep -A10 "\"$entry_name\"" )
+    block=$(echo "$ls_json" | grep -A10 "\"$entry_name\"")
     is_usb=$(echo "$block" | grep '"storage": *"usb"')
     is_mounted=$(echo "$block" | grep '"mounted": *"yes"')
     if [ -n "$is_usb" ] && [ -n "$is_mounted" ]; then
@@ -227,10 +227,10 @@ get_temperature() {
   cpu_str=""
 
   if [ "$arch" = "aarch64" ]; then
-      temp_cpu_raw=$(cat /sys/devices/virtual/thermal/thermal_zone0/temp | tr -d -c '0-9')
-      if [ -n "$temp_cpu_raw" ]; then
-        temp_cpu=$((temp_cpu_raw / 1000))
-        cpu_str=" | CPU: ${temp_cpu}°C"
+    temp_cpu_raw=$(cat /sys/devices/virtual/thermal/thermal_zone0/temp | tr -d -c '0-9')
+    if [ -n "$temp_cpu_raw" ]; then
+      temp_cpu=$((temp_cpu_raw / 1000))
+      cpu_str=" | CPU: ${temp_cpu}°C"
     fi
   fi
 
