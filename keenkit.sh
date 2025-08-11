@@ -10,11 +10,10 @@ USERNAME="spatiumstas"
 USER='root'
 REPO="KeenKit"
 SCRIPT="keenkit.sh"
-OTA_REPO="osvault"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.3.2"
+SCRIPT_VERSION="2.3.3"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -68,9 +67,8 @@ main_menu() {
     3) backup_entware ;;
     4) rewrite_block ;;
     5) ota_update ;;
-    6) service_data_generator ;;
+    6) service ;;
     7) change_country ;;
-    8) change_server ;;
     00) exit ;;
     88) packages_delete ;;
     99) script_update "main" ;;
@@ -241,8 +239,10 @@ get_temperature() {
       echo "Wi-Fi: ${temp_5}°C${cpu_str}"
       return
     fi
+    echo "2.4GHz: ${temp_2}°C | 5GHz: ${temp_5}°C${cpu_str}"
+  else
+    echo "2.4GHz: ${temp_2}°C${cpu_str}"
   fi
-  echo "2.4GHz: ${temp_2}°C | 5GHz: ${temp_5}°C${cpu_str}"
 }
 
 get_cpu_model() {
@@ -480,32 +480,13 @@ has_an_external_storage() {
 
 change_country() {
   if get_country; then
-    print_message "Регион роутера RU, необходимо изменить на EA" "$CYAN"
+    print_message "Регион роутера RU, рекомендуется изменить на EA" "$CYAN"
     read -p "Изменить страну? (y/n) " user_input
     user_input=$(echo "$user_input" | tr -d ' \n\r')
     echo ""
     case "$user_input" in
     y | Y)
-      service_data_generator "country"
-      ;;
-    n | N)
-      echo ""
-      ;;
-    *) ;;
-    esac
-  fi
-  main_menu
-}
-
-change_server() {
-  if ! get_host; then
-    print_message "Регион работы роутера будет изменён EU ↔ EA. Продолжая, вы принимаете на себя всю ответственность" "$RED"
-    read -p "Изменить регион? (y/n) " user_input
-    user_input=$(echo "$user_input" | tr -d ' \n\r')
-    echo ""
-    case "$user_input" in
-    y | Y)
-      service_data_generator "server"
+      service "country"
       ;;
     n | N)
       echo ""
@@ -609,6 +590,10 @@ umountFS() {
   print_message "UnlockFS: true"
 }
 
+get_osvault(){
+  echo "b3N2YXVsdC5kdWNrZG5zLm9yZw==" | base64 -d
+}
+
 show_progress() {
   local total_size="$1"
   local downloaded=0
@@ -638,21 +623,20 @@ ota_update() {
   check_host
   packages_checker "curl findutils"
   internet_checker
-  REQUEST=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/")
-  DIRS=$(echo "$REQUEST" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep -v '^\.\(github\)$')
+  osvault="$(get_osvault)/osvault/"
+  REQUEST=$(curl -L -s "$osvault")
+  DIRS=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
 
   if [ -z "$DIRS" ]; then
-    MESSAGE=$(echo "$REQUEST" | grep -Po '"message":.*?[^\\]",' | awk -F'"' '{print $4}')
-    print_message "Ошибка при получении данных с GitHub, попробуйте позже или через VPN" "$RED"
-    echo "$MESSAGE"
+    http_code=$(curl -L -s -o /dev/null -w "%{http_code}" "$osvault")
+    print_message "Ошибка $http_code при получении данных, попробуйте позже" "$RED"
     exit_function
   fi
 
   echo "Доступные модели:"
   i=1
-  IFS=$'\n'
-  for DIR in $DIRS; do
-    printf "$i. $DIR\n"
+  echo "$DIRS" | while IFS= read -r DIR; do
+    printf "%d. %s\n" "$i" "$DIR"
     i=$((i + 1))
   done
   exit_main_menu
@@ -660,12 +644,7 @@ ota_update() {
   while true; do
     read -p "Выберите модель (от 1 до $dir_count): " DIR_NUM
     if [ "$DIR_NUM" = "00" ]; then
-      unset FILE
-      unset DOWNLOAD_PATH
-      unset use_mount
-      unset progress_pid
       main_menu
-      return
     fi
     if echo "$DIR_NUM" | grep -qE '^[0-9]+$' && [ "$DIR_NUM" -ge 1 ] && [ "$DIR_NUM" -le "$dir_count" ]; then
       break
@@ -674,16 +653,19 @@ ota_update() {
     fi
   done
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
+  DIR_ENCODED=$(echo "$DIR" | sed 's/ /%20/g')
 
-  BIN_FILES=$(curl -s "https://api.github.com/repos/$USERNAME/$OTA_REPO/contents/$(echo "$DIR" | sed 's/ /%20/g')" | grep -Po '"name":.*?[^\\]",' | awk -F'"' '{print $4}' | grep ".bin")
+  REQUEST=$(curl -L -s "$osvault$DIR_ENCODED/")
+  BIN_FILES=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep '\.bin$' | sed 's|%20| |g')
+
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
     exit_function
   else
     printf "\nПрошивки для $DIR:\n"
     i=1
-    for FILE in $BIN_FILES; do
-      printf "$i. $FILE\n"
+    echo "$BIN_FILES" | while IFS= read -r FILE; do
+      printf "%d. %s\n" "$i" "$FILE"
       i=$((i + 1))
     done
     exit_main_menu
@@ -705,6 +687,7 @@ ota_update() {
       fi
     done
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
+    FILE_ENCODED=$(echo "$FILE" | sed 's/ /%20/g')
 
     if [ -z "$FILE" ]; then
       print_message "Файл не выбран" "$RED"
@@ -721,22 +704,17 @@ ota_update() {
     fi
     mkdir -p "$DOWNLOAD_PATH"
     echo ""
-    total_size=$(curl -sI "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" | grep -i content-length | awk '{print $2}' | tr -d '\r')
+    total_size=$(curl -sIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" "$FILE" &
     progress_pid=$!
-
-    curl -L --silent \
-      "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/$(echo "$FILE" | sed 's/ /%20/g')" \
-      --output "$DOWNLOAD_PATH/$FILE"
-
+    curl -L --silent "$osvault/$DIR_ENCODED/$FILE_ENCODED" --output "$DOWNLOAD_PATH/$FILE"
     wait $progress_pid
     if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
       exit_function
     fi
 
-    curl -L -s "https://raw.githubusercontent.com/$USERNAME/$OTA_REPO/master/$(echo "$DIR" | sed 's/ /%20/g')/md5sum" --output "$DOWNLOAD_PATH/md5sum"
-
+    curl -L -s "$osvault/$DIR_ENCODED/md5sum" --output "$DOWNLOAD_PATH/md5sum"
     MD5SUM_REMOTE=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     MD5SUM_LOCAL=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
@@ -1075,15 +1053,15 @@ rewrite_block() {
   exit_function
 }
 
-service_data_generator() {
+service() {
   folder_path="$OPT_DIR/backup$DATE"
-  SCRIPT_PATH="$TMP_DIR/service_data_generator.py"
+  SCRIPT_PATH="$TMP_DIR/service.py"
   target_flag=$1
   packages_checker "curl python3-base python3 python3-light libpython3 findutils" "--nodeps"
 
-  curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/main/service_data_generator.py" --output "$SCRIPT_PATH"
-  if [ $? -ne 0 ]; then
-    print_message "Ошибка загрузки скрипта в $SCRIPT_PATH" "$RED"
+  curl -L -s "$(get_osvault)/scripts/service.py" --output "$SCRIPT_PATH"
+  if [ $? -ne 0 ] || ! head -n1 "$SCRIPT_PATH" | grep -q "^#\|^import\|^def\|^class"; then
+    print_message "Ошибка при получении файла, попробуйте позже" "$RED"
     exit_function
   fi
 
