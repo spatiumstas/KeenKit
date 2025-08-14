@@ -199,7 +199,7 @@ get_boot_current() {
 }
 
 get_ndm_storage() {
-  strings /lib/modules/4.9-ndm-5/ndm_storage.ko 2>/dev/null | grep -q "Firmware_2\|Storage_C"
+  strings /lib/modules/4.9-ndm-5/ndm_storage.ko 2>/dev/null | grep -q "Firmware_2"
 }
 
 get_architecture() {
@@ -591,7 +591,7 @@ umountFS() {
 }
 
 get_osvault(){
-  echo "b3N2YXVsdC5kdWNrZG5zLm9yZw==" | base64 -d
+  echo "NDUuMTMzLjI0Ny43Ng==" | base64 -d
 }
 
 show_progress() {
@@ -623,13 +623,14 @@ ota_update() {
   check_host
   packages_checker "curl findutils"
   internet_checker
-  osvault="$(get_osvault)/osvault/"
+  osvault="$(get_osvault)/osvault"
   REQUEST=$(curl -L -s "$osvault")
   DIRS=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
 
   if [ -z "$DIRS" ]; then
-    http_code=$(curl -L -s -o /dev/null -w "%{http_code}" "$osvault")
-    print_message "Ошибка $http_code при получении данных, попробуйте позже" "$RED"
+    status_line=$(wget -S --spider -O /dev/null "$osvault" 2>&1 | grep 'HTTP/' | tail -n1)
+    http_text=$(echo "$status_line" | cut -d' ' -f3-)
+    print_message "Ошибка $http_text при получении данных, попробуйте позже" "$RED"
     exit_function
   fi
 
@@ -655,7 +656,7 @@ ota_update() {
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
   DIR_ENCODED=$(echo "$DIR" | sed 's/ /%20/g')
 
-  REQUEST=$(curl -L -s "$osvault$DIR_ENCODED/")
+  REQUEST=$(curl -L -s "$osvault/$DIR_ENCODED/")
   BIN_FILES=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep '\.bin$' | sed 's|%20| |g')
 
   if [ -z "$BIN_FILES" ]; then
@@ -1054,6 +1055,7 @@ rewrite_block() {
 }
 
 service() {
+  check_host
   folder_path="$OPT_DIR/backup$DATE"
   SCRIPT_PATH="$TMP_DIR/service.py"
   target_flag=$1
