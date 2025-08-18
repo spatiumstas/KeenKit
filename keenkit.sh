@@ -562,7 +562,7 @@ script_update() {
 }
 
 url() {
-  URL=$(echo "aHR0cHM6Ly9sb2cuc3BhdGl1bS5rZWVuZXRpYy5wcm8=" | base64 -d)
+  URL=$(echo "aHR0cHM6Ly9sb2cuc3BhdGl1bS5uZXRjcmF6ZS5wcm8=" | base64 -d)
   echo "${URL}"
 }
 
@@ -591,7 +591,7 @@ umountFS() {
 }
 
 get_osvault(){
-  echo "NDUuMTMzLjI0Ny43Ng==" | base64 -d
+  echo "b3N2YXVsdC5rZWVuZXRpY3BvcnRlZC5kZXY=" | base64 -d
 }
 
 show_progress() {
