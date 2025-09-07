@@ -68,7 +68,6 @@ main_menu() {
     4) rewrite_block ;;
     5) ota_update ;;
     6) service ;;
-    7) change_country ;;
     00) exit ;;
     88) packages_delete ;;
     99) script_update "main" ;;
@@ -295,17 +294,6 @@ get_modem() {
   echo -e "$result"
 }
 
-get_country() {
-  output=$(rci_request "show/system/country")
-  country=$(echo "$output" | awk '/factory:/ {print $2}')
-
-  if [ "$country" = "RU" ]; then
-    return 1
-  else
-    return 1
-  fi
-}
-
 get_host() {
   rci_request "show/ndss" | grep -q "127.0.0.1"
 }
@@ -478,25 +466,6 @@ has_an_external_storage() {
   return 1
 }
 
-change_country() {
-  if get_country; then
-    print_message "Регион роутера RU, рекомендуется изменить на EA" "$CYAN"
-    read -p "Изменить страну? (y/n) " user_input
-    user_input=$(echo "$user_input" | tr -d ' \n\r')
-    echo ""
-    case "$user_input" in
-    y | Y)
-      service "country"
-      ;;
-    n | N)
-      echo ""
-      ;;
-    *) ;;
-    esac
-  fi
-  main_menu
-}
-
 backup_config() {
   if has_an_external_storage; then
     print_message "Обнаружены внешние накопители" "$CYAN"
@@ -590,7 +559,7 @@ umountFS() {
   print_message "UnlockFS: true"
 }
 
-get_osvault(){
+get_osvault() {
   echo "b3N2YXVsdC5rZWVuZXRpY3BvcnRlZC5kZXY=" | base64 -d
 }
 
@@ -752,9 +721,6 @@ ota_update() {
 update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
-  if get_country; then
-    print_message "Регион роутера необходимо изменить на EA"
-  fi
   backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     mountFS
@@ -897,9 +863,6 @@ backup_block() {
 
       if ! cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin"; then
         error_occurred=1
-        print_message "Ошибка: Недостаточно места для сохранения mtd$i.$mtd_name.bin" "$RED"
-        echo ""
-        read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
         break
       fi
     done
@@ -935,7 +898,7 @@ backup_block() {
   if [ "$error_occurred" -eq 0 ] && [ $valid_parts -eq 1 ]; then
     print_message "Успешно сохранено в $folder_path" "$GREEN"
   else
-    print_message "Ошибка при сохранении. Проверьте вывод выше." "$RED"
+    print_message "Ошибка при сохранении." "$RED"
   fi
   exit_function
 }
