@@ -525,7 +525,8 @@ script_update() {
     print_message "Скрипт успешно обновлён" "$GREEN"
     $OPT_DIR/$SCRIPT post_update
   else
-    print_message "Ошибка при скачивании скрипта" "$RED"
+    response=$(curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" | head -n1)
+    print_message "Ошибка $response при обновлении скрипта" "$RED"
     exit_function
   fi
 }
