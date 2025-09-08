@@ -1,7 +1,7 @@
 # KeenKit
 ### Многофункциональный скрипт, упрощающий взаимодействие с роутером на базе KeeneticOS
 
-<img width="682" alt="image" src="https://github.com/user-attachments/assets/3356aeaf-0ab1-4ffd-8950-e56e14ab3aff" />
+<img width="682" height="570" alt="image" src="https://github.com/user-attachments/assets/58754ff8-587d-4eb3-b29e-48810acca134" />
 
 
 
