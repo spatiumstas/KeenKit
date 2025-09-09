@@ -178,6 +178,7 @@ get_opkg_storage() {
 }
 
 get_internal_storage_size() {
+  local flag="$1"
   local ls_json
   ls_json=$(rci_request "ls")
   local free total
@@ -185,7 +186,11 @@ get_internal_storage_size() {
   total=$(echo "$ls_json" | grep -A10 '"storage:"' | grep '"total":' | head -1 | grep -o '[0-9]\+')
   if [ -n "$free" ] && [ -n "$total" ]; then
     used=$((total - free))
-    format_size $used $total
+    if [ "$flag" = "free" ]; then
+      echo $((free / 1024 / 1024))
+    else
+      format_size $used $total
+    fi
   fi
 }
 
@@ -575,7 +580,7 @@ show_progress() {
     if [ -f "$file_path" ]; then
       downloaded=$(ls -l "$file_path" | awk '{print $5}')
       progress=$((downloaded * 100 / total_size))
-      printf "\rЗагружаю $file_name... (%d%%)" "$progress"
+      printf "\rЗагружаю $file_path... (%d%%)" "$progress"
     fi
     sleep 1
   done
@@ -664,10 +669,12 @@ ota_update() {
       print_message "Файл не выбран" "$RED"
       exit_function
     fi
-
+    total_size=$(curl -sIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     ram_size=$(get_ram_size)
-    if [ "$ram_size" -lt $MIN_RAM_SIZE ]; then
-      DOWNLOAD_PATH="$OPT_DIR"
+    total_size_mb=$((total_size / 1024 / 1024))
+    free_space_mb=$(get_internal_storage_size free)
+    if [ "$ram_size" -lt "$MIN_RAM_SIZE" ] || [ "$free_space_mb" -ge "$total_size_mb" ]; then
+      DOWNLOAD_PATH="$STORAGE_DIR"
       use_mount=true
     else
       DOWNLOAD_PATH="$TMP_DIR"
@@ -675,7 +682,6 @@ ota_update() {
     fi
     mkdir -p "$DOWNLOAD_PATH"
     echo ""
-    total_size=$(curl -sIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" "$FILE" &
     progress_pid=$!
     curl -L --silent "$osvault/$DIR_ENCODED/$FILE_ENCODED" --output "$DOWNLOAD_PATH/$FILE"
@@ -708,11 +714,13 @@ ota_update() {
       ;;
     n | N)
       rm -f "$DOWNLOAD_PATH/$FILE"
+      rm -f "$DOWNLOAD_PATH/md5sum"
       exit_function
       ;;
     *) ;;
     esac
     rm -f "$DOWNLOAD_PATH/$FILE"
+    rm -f "$DOWNLOAD_PATH/md5sum"
     print_message "Перезагружаю устройство..." "${CYAN}"
     sleep 1
     reboot
