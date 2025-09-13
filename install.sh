@@ -22,7 +22,7 @@ packages_checker() {
   if [ -n "$missing" ]; then
     print_message "Устанавливаем:$missing"
     opkg update >/dev/null 2>&1
-    opkg install $missing --nodeps
+    opkg install $missing
     echo ""
   fi
 }
