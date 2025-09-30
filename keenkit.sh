@@ -736,7 +736,8 @@ update_firmware_block() {
   fi
 
   for partition in Firmware Firmware_1 Firmware_2; do
-    if [ "$partition" = "Firmware_2" ] && get_ndm_storage; then
+    if [ "$partition" = "Firmware_2" ] && ( get_ndm_storage || [ "$(get_boot_current)" = "1" ] ); then
+      echo "Пропускаю второй раздел"
       continue
     fi
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
