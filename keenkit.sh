@@ -146,10 +146,12 @@ format_size() {
 
 get_opkg_storage() {
   local opkg_label
-  opkg_label=$(rci_request "show/sc/opkg/disk" | grep -o '"disk": *"[^\"]*"' | cut -d'"' -f4 | sed 's,/$,,;s,:$,,')
+  local storage_block
   local ls_json
-  ls_json=$(rci_request "ls")
   local free total
+
+  opkg_label=$(rci_request "show/sc/opkg/disk" | grep -o '"disk": *"[^\"]*"' | cut -d'"' -f4 | sed 's,/$,,;s,:$,,')
+  ls_json=$(rci_request "ls")
 
   free=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"free":' | head -1 | grep -o '[0-9]\+')
   total=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"total":' | head -1 | grep -o '[0-9]\+')
@@ -160,21 +162,16 @@ get_opkg_storage() {
     return
   fi
 
-  echo "$ls_json" | grep -o '"[A-Za-z0-9 _-]\{3,\}:"' | while read -r entry; do
-    entry_name=$(echo "$entry" | tr -d '"')
-    block=$(echo "$ls_json" | grep -A10 "\"$entry_name\"")
-    is_usb=$(echo "$block" | grep '"storage": *"usb"')
-    is_mounted=$(echo "$block" | grep '"mounted": *"yes"')
-    if [ -n "$is_usb" ] && [ -n "$is_mounted" ]; then
-      free=$(echo "$block" | grep '"free":' | head -1 | grep -o '[0-9]\+')
-      total=$(echo "$block" | grep '"total":' | head -1 | grep -o '[0-9]\+')
-      if [ -n "$free" ] && [ -n "$total" ]; then
-        used=$((total - free))
-        echo "$(format_size $used $total)"
-        exit 0
-      fi
+  storage_block=$(echo "$ls_json" | grep -E -e '"free":' -e '"label":' -e '"total":' | grep -A1 -B1 "\"label\": \"$opkg_label\"")
+  if [ -n "$storage_block" ]; then
+    free=$(echo "$storage_block" | grep '"free":' | head -1 | grep -o '[0-9]\+')
+    total=$(echo "$storage_block" | grep '"total":' | head -1 | grep -o '[0-9]\+')
+    if [ -n "$free" ] && [ -n "$total" ]; then
+      used=$((total - free))
+      echo "$(format_size $used $total)"
+      return
     fi
-  done
+  fi
 }
 
 get_internal_storage_size() {
