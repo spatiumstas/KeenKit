@@ -146,10 +146,12 @@ format_size() {
 
 get_opkg_storage() {
   local opkg_label
-  opkg_label=$(rci_request "show/sc/opkg/disk" | grep -o '"disk": *"[^\"]*"' | cut -d'"' -f4 | sed 's,/$,,;s,:$,,')
+  local storage_block
   local ls_json
-  ls_json=$(rci_request "ls")
   local free total
+
+  opkg_label=$(rci_request "show/sc/opkg/disk" | grep -o '"disk": *"[^\"]*"' | cut -d'"' -f4 | sed 's,/$,,;s,:$,,')
+  ls_json=$(rci_request "ls")
 
   free=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"free":' | head -1 | grep -o '[0-9]\+')
   total=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"total":' | head -1 | grep -o '[0-9]\+')
@@ -160,21 +162,16 @@ get_opkg_storage() {
     return
   fi
 
-  echo "$ls_json" | grep -o '"[A-Za-z0-9 _-]\{3,\}:"' | while read -r entry; do
-    entry_name=$(echo "$entry" | tr -d '"')
-    block=$(echo "$ls_json" | grep -A10 "\"$entry_name\"")
-    is_usb=$(echo "$block" | grep '"storage": *"usb"')
-    is_mounted=$(echo "$block" | grep '"mounted": *"yes"')
-    if [ -n "$is_usb" ] && [ -n "$is_mounted" ]; then
-      free=$(echo "$block" | grep '"free":' | head -1 | grep -o '[0-9]\+')
-      total=$(echo "$block" | grep '"total":' | head -1 | grep -o '[0-9]\+')
-      if [ -n "$free" ] && [ -n "$total" ]; then
-        used=$((total - free))
-        echo "$(format_size $used $total)"
-        exit 0
-      fi
+  storage_block=$(echo "$ls_json" | grep -E -e '"free":' -e '"label":' -e '"total":' | grep -A1 -B1 "\"label\": \"$opkg_label\"")
+  if [ -n "$storage_block" ]; then
+    free=$(echo "$storage_block" | grep '"free":' | head -1 | grep -o '[0-9]\+')
+    total=$(echo "$storage_block" | grep '"total":' | head -1 | grep -o '[0-9]\+')
+    if [ -n "$free" ] && [ -n "$total" ]; then
+      used=$((total - free))
+      echo "$(format_size $used $total)"
+      return
     fi
-  done
+  fi
 }
 
 get_internal_storage_size() {
@@ -367,6 +364,37 @@ perform_dd() {
     umountFS
     exit_function
   fi
+}
+
+check_mtd_size() {
+  local input_file="$1"
+  local output_file="$2"
+
+  if echo "$output_file" | grep -qE '^/dev/mtdblock[0-9]+'; then
+    local mtd_index
+    mtd_index=$(echo "$output_file" | grep -oE '[0-9]+$')
+    [ -n "$mtd_index" ] || return 0
+
+    local line size_hex part_size file_size
+    line=$(grep "^mtd${mtd_index}:" /proc/mtd 2>/dev/null)
+    [ -n "$line" ] || return 0
+
+    set -- $line
+    size_hex=$2
+    echo "$size_hex" | grep -qiE '^[0-9a-f]+$' || return 0
+    part_size=$((0x$size_hex))
+
+    [ -f "$input_file" ] || return 0
+    file_size=$(wc -c <"$input_file" 2>/dev/null)
+    echo "$file_size" | grep -qE '^[0-9]+$' || return 0
+
+    if [ "$file_size" -gt "$part_size" ]; then
+      print_message "The file is larger than the selected partition" "$RED"
+      umount /tmp >/dev/null 2>&1
+      exit_function
+    fi
+  fi
+  return 0
 }
 
 select_drive() {
@@ -736,7 +764,8 @@ update_firmware_block() {
   fi
 
   for partition in Firmware Firmware_1 Firmware_2; do
-    if [ "$partition" = "Firmware_2" ] && get_ndm_storage; then
+    if [ "$partition" = "Firmware_2" ] && (get_ndm_storage || [ "$(get_boot_current)" = "1" ]); then
+      echo "Skipping second partition"
       continue
     fi
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
@@ -744,6 +773,7 @@ update_firmware_block() {
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+      check_mtd_size "$firmware" "/dev/mtdblock$result"
       echo "$partition on mtd${result} partition, updating..."
       perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
@@ -992,6 +1022,7 @@ rewrite_block() {
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         mountFS
       fi
+      check_mtd_size "$mtdFile" "/dev/mtdblock$part"
       perform_dd "$mtdFile" "/dev/mtdblock$part"
       print_message "Partition successfully overwritten" "$GREEN"
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
@@ -1067,10 +1098,12 @@ service() {
   y | Y)
     echo ""
     printf "${CYAN}Overwriting first partition...${NC}\n"
+    check_mtd_size "$mtdFile" "/dev/mtdblock$mtdSlot"
     perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
       echo ""
       printf "${CYAN}Second partition found, overwriting...${NC}\n"
+      check_mtd_size "$mtdFile" "/dev/mtdblock$mtdSlot_res"
       perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
