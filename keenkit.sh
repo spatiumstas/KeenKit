@@ -366,6 +366,38 @@ perform_dd() {
   fi
 }
 
+check_mtd_size() {
+  local input_file="$1"
+  local output_file="$2"
+
+  if echo "$output_file" | grep -qE '^/dev/mtdblock[0-9]+'; then
+    local mtd_index
+    mtd_index=$(echo "$output_file" | grep -oE '[0-9]+$')
+    [ -n "$mtd_index" ] || return 0
+
+    local line size_hex part_size file_size
+    line=$(grep "^mtd${mtd_index}:" /proc/mtd 2>/dev/null)
+    [ -n "$line" ] || return 0
+
+    set -- $line
+    size_hex=$2
+    echo "$size_hex" | grep -qiE '^[0-9a-f]+$' || return 0
+    part_size=$((0x$size_hex))
+
+    [ -f "$input_file" ] || return 0
+    file_size=$(wc -c < "$input_file" 2>/dev/null)
+    echo "$file_size" | grep -qE '^[0-9]+$' || return 0
+
+    if [ "$file_size" -gt "$part_size" ]; then
+      print_message "Файл больше выбранного раздела" "$RED"
+      umount /tmp >/dev/null 2>&1
+      exit_function
+    fi
+  fi
+  return 0
+}
+
+
 select_drive() {
   local message="$1"
   labels=""
@@ -742,6 +774,7 @@ update_firmware_block() {
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+      check_mtd_size "$firmware" "/dev/mtdblock$result"
       echo "$partition на mtd${result} разделе, обновляю..."
       perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
@@ -990,6 +1023,7 @@ rewrite_block() {
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         mountFS
       fi
+      check_mtd_size "$mtdFile" "/dev/mtdblock$part"
       perform_dd "$mtdFile" "/dev/mtdblock$part"
       print_message "Раздел успешно перезаписан" "$GREEN"
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
@@ -1065,10 +1099,12 @@ service() {
   y | Y)
     echo ""
     printf "${CYAN}Перезаписываю первый раздел...${NC}\n"
+    check_mtd_size "$mtdFile" "/dev/mtdblock$mtdSlot"
     perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
       echo ""
       printf "${CYAN}Найден второй раздел, перезаписываю...${NC}\n"
+      check_mtd_size "$mtdFile" "/dev/mtdblock$mtdSlot_res"
       perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
