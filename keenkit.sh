@@ -356,7 +356,7 @@ packages_delete() {
 perform_dd() {
   local input_file="$1"
   local output_file="$2"
-
+  checking_mtd_size "$input_file" "$output_file" || return 1
   output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
 
   if echo "$output" | grep -iq "error\|can't"; then
@@ -366,7 +366,7 @@ perform_dd() {
   fi
 }
 
-check_mtd_size() {
+checking_mtd_size() {
   local input_file="$1"
   local output_file="$2"
 
@@ -392,6 +392,7 @@ check_mtd_size() {
       print_message "The file is larger than the selected partition" "$RED"
       umount /tmp >/dev/null 2>&1
       exit_function
+      return 1
     fi
   fi
   return 0
@@ -773,7 +774,6 @@ update_firmware_block() {
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      check_mtd_size "$firmware" "/dev/mtdblock$result"
       echo "$partition on mtd${result} partition, updating..."
       perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
@@ -1022,7 +1022,6 @@ rewrite_block() {
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         mountFS
       fi
-      check_mtd_size "$mtdFile" "/dev/mtdblock$part"
       perform_dd "$mtdFile" "/dev/mtdblock$part"
       print_message "Partition successfully overwritten" "$GREEN"
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
@@ -1098,12 +1097,10 @@ service() {
   y | Y)
     echo ""
     printf "${CYAN}Overwriting first partition...${NC}\n"
-    check_mtd_size "$mtdFile" "/dev/mtdblock$mtdSlot"
     perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
       echo ""
       printf "${CYAN}Second partition found, overwriting...${NC}\n"
-      check_mtd_size "$mtdFile" "/dev/mtdblock$mtdSlot_res"
       perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
