@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.3.3"
+SCRIPT_VERSION="2.3.4"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -357,6 +357,7 @@ perform_dd() {
   local input_file="$1"
   local output_file="$2"
 
+  checking_mtd_size "$input_file" "$output_file" || return 1
   output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
 
   if echo "$output" | grep -iq "error\|can't"; then
@@ -365,6 +366,39 @@ perform_dd() {
     exit_function
   fi
 }
+
+checking_mtd_size() {
+  local input_file="$1"
+  local output_file="$2"
+
+  if echo "$output_file" | grep -qE '^/dev/mtdblock[0-9]+'; then
+    local mtd_index
+    mtd_index=$(echo "$output_file" | grep -oE '[0-9]+$')
+    [ -n "$mtd_index" ] || return 0
+
+    local line size_hex part_size file_size
+    line=$(grep "^mtd${mtd_index}:" /proc/mtd 2>/dev/null)
+    [ -n "$line" ] || return 0
+
+    set -- $line
+    size_hex=$2
+    echo "$size_hex" | grep -qiE '^[0-9a-f]+$' || return 0
+    part_size=$((0x$size_hex))
+
+    [ -f "$input_file" ] || return 0
+    file_size=$(wc -c < "$input_file" 2>/dev/null)
+    echo "$file_size" | grep -qE '^[0-9]+$' || return 0
+
+    if [ "$file_size" -gt "$part_size" ]; then
+      print_message "Файл больше выбранного раздела" "$RED"
+      umount /tmp >/dev/null 2>&1
+      exit_function
+      return 1
+    fi
+  fi
+  return 0
+}
+
 
 select_drive() {
   local message="$1"
@@ -505,7 +539,8 @@ backup_config() {
 exit_function() {
   echo ""
   read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
-  main_menu
+  pkill -P $$ 2>/dev/null
+  exec "$OPT_DIR/$SCRIPT"
 }
 
 exit_main_menu() {
