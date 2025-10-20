@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.3.4"
+SCRIPT_VERSION="2.3.5"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -306,6 +306,34 @@ check_host() {
   fi
 }
 
+spinner_start() {
+  SPINNER_MSG="$1"
+  local spin='|/-\\' i=0
+  echo -n "[ ] $SPINNER_MSG"
+  (
+    while :; do
+      i=$(((i + 1) % 4))
+      printf "\r[%s] %s" "${spin:$i:1}" "$SPINNER_MSG"
+      usleep 100000
+    done
+  ) &
+  SPINNER_PID=$!
+}
+
+spinner_stop() {
+  local rc=${1:-0}
+  if [ -n "$SPINNER_PID" ]; then
+    kill "$SPINNER_PID" 2>/dev/null
+    wait "$SPINNER_PID" 2>/dev/null
+    unset SPINNER_PID
+  fi
+  if [ $rc -eq 0 ]; then
+    printf "\r[✔] %s\n" "$SPINNER_MSG"
+  else
+    printf "\r[✖] %s\n" "$SPINNER_MSG"
+  fi
+}
+
 packages_checker() {
   local packages="$1"
   local flag="$2"
@@ -399,7 +427,6 @@ checking_mtd_size() {
   return 0
 }
 
-
 select_drive() {
   local message="$1"
   labels=""
@@ -468,9 +495,12 @@ select_drive() {
 $media_output
 EOF
 
-  echo ""
+  exit_main_menu
   read -p "$message " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
+  if [ "$choice" = "00" ]; then
+    main_menu
+  fi
   echo ""
   case "$choice" in
   0) selected_drive="$TMP_DIR" ;;
@@ -768,8 +798,7 @@ update_firmware_block() {
   fi
 
   for partition in Firmware Firmware_1 Firmware_2; do
-    if [ "$partition" = "Firmware_2" ] && ( get_ndm_storage || [ "$(get_boot_current)" = "1" ] ); then
-      echo "Пропускаю второй раздел"
+    if [ "$partition" = "Firmware_2" ] && (get_ndm_storage || [ "$(get_boot_current)" = "1" ]); then
       continue
     fi
     mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
@@ -777,7 +806,7 @@ update_firmware_block() {
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      echo "$partition на mtd${result} разделе, обновляю..."
+      echo "Обновляю $partition..."
       perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
     fi
@@ -876,7 +905,7 @@ backup_block() {
   output=$(mount)
   select_drive "Выберите накопитель для бэкапа:"
   mtd_output=$(cat /proc/mtd)
-  printf "${GREEN}Доступные разделы:${NC}\n"
+  printf "\n${GREEN}Доступные разделы:${NC}\n"
   echo "$mtd_output" | awk 'NR>1 {print $0}'
   printf "99. Бэкап всех разделов${NC}\n"
   exit_main_menu
@@ -897,13 +926,16 @@ backup_block() {
     output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
     for i in $(seq 0 $(($output_all_mtd - 1))); do
       mtd_name=$(echo "$mtd_output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
-      echo "Копирую mtd$i.$mtd_name.bin..."
       if [ $valid_parts -eq 0 ]; then
         mkdir -p "$folder_path"
         valid_parts=1
       fi
 
-      if ! cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin"; then
+      spinner_start "Копирую mtd$i.$mtd_name.bin"
+      if cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin"; then
+        spinner_stop 0
+      else
+        spinner_stop 1
         error_occurred=1
         break
       fi
@@ -922,13 +954,13 @@ backup_block() {
         valid_parts=1
       fi
 
-      printf "Выбран ${GREEN}mtd$part.$selected_mtd.bin${NC}, копирую..."
-      sleep 1
-      echo ""
-      if ! dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" 2>&1; then
+      spinner_start "Копирую mtd$part.$selected_mtd.bin"
+      if dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" >/dev/null 2>&1; then
+        spinner_stop 0
+      else
+        spinner_stop 1
         error_occurred=1
       fi
-      echo ""
     done
   fi
 
@@ -946,20 +978,22 @@ backup_block() {
 }
 
 backup_entware() {
-  packages_checker "tar"
+  packages_checker "tar libacl"
   output=$(mount)
   select_drive "Выберите накопитель:"
-  print_message "Выполняю копирование..." "$CYAN"
-
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
+  spinner_start "Выполняю копирование"
   tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" --exclude="$backup_file" . 2>&1)
-  log_operation=$(echo "$tar_output" | tail -n 2)
+  rc=$?
 
+  log_operation=$(echo "$tar_output" | tail -n 2)
   if echo "$log_operation" | grep -iq "error\|no space left on device"; then
+    spinner_stop 1
     print_message "Ошибка при создании бэкапа:" "$RED"
     echo "$log_operation"
   else
-    print_message "Бэкап успешно скопирован в $backup_file" "$GREEN"
+    spinner_stop 0
+    print_message "Бэкап успешно сохранен в $backup_file" "$GREEN"
   fi
   exit_function
 }
@@ -1129,6 +1163,12 @@ service() {
 }
 
 cleanup() {
+  if [ -n "$SPINNER_PID" ]; then
+    kill "$SPINNER_PID" 2>/dev/null
+    wait "$SPINNER_PID" 2>/dev/null
+    printf "\r\n"
+    unset SPINNER_PID
+  fi
   pkill -P $$ 2>/dev/null
   exit 0
 }
