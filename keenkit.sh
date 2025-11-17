@@ -5,7 +5,6 @@ RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
-
 USERNAME="spatiumstas"
 USER='root'
 REPO="KeenKit"
@@ -13,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.3.5"
+SCRIPT_VERSION="2.4"
 MIN_RAM_SIZE="256"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
@@ -29,8 +28,9 @@ print_menu() {
  |_|\_\___|\___|_| |_|_|\_\_|\__|
 
 EOF
+  arch="$(get_architecture)"
   printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (слот: "$(get_boot_current)")"
-  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($(get_architecture)) | $(get_temperature)"
+  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($arch) | $(get_temperature)"
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
     printf "${CYAN}Модем:          ${NC}%s\n" "$get_modem_info"
   fi
@@ -45,6 +45,9 @@ EOF
     echo "4. Заменить раздел"
     echo "5. OTA Update"
     echo "6. Заменить сервисные данные"
+  fi
+  if ! { [ "$arch" = "aarch64" ] && get_host; }; then
+    echo "7. Переключить слот"
   fi
   printf "\n88. Удалить используемые пакеты\n"
   echo "99. Обновить скрипт"
@@ -68,6 +71,7 @@ main_menu() {
     4) rewrite_block ;;
     5) ota_update ;;
     6) service ;;
+    7) switch_boot_slot ;;
     00) exit ;;
     88) packages_delete ;;
     99) script_update "main" ;;
@@ -197,6 +201,124 @@ get_ram_size() {
 
 get_boot_current() {
   cat /proc/dual_image/boot_current 2>/dev/null
+}
+
+copy_dual_config() {
+  local current_slot="$1"
+  local new_slot="$2"
+  local cfg_slot1 cfg_slot2 src_cfg_slot dst_cfg_slot
+  local arch src_dev dst_dev
+
+  cfg_slot1=$(grep -w 'Config_1' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  cfg_slot2=$(grep -w 'Config_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+
+  if [ -z "$cfg_slot1" ] || [ -z "$cfg_slot2" ]; then
+    print_message "Разделы Config_1/Config_2 не найдены, копирование конфигурации невозможно." "$RED"
+    return 1
+  fi
+
+  case "$current_slot-$new_slot" in
+  1-2)
+    src_cfg_slot="$cfg_slot1"
+    dst_cfg_slot="$cfg_slot2"
+    ;;
+  2-1)
+    src_cfg_slot="$cfg_slot2"
+    dst_cfg_slot="$cfg_slot1"
+    ;;
+  *)
+    ;;
+  esac
+
+  arch="$(get_architecture)"
+  case "$arch" in
+  aarch64)
+    src_dev="/dev/mtd$src_cfg_slot"
+    dst_dev="/dev/mtd$dst_cfg_slot"
+    ;;
+  mips | mipsel | *)
+    src_dev="/dev/mtdblock$src_cfg_slot"
+    dst_dev="/dev/mtdblock$dst_cfg_slot"
+    ;;
+  esac
+
+  print_message "Копирую конфигурацию: Config_$current_slot → Config_$new_slot" "$CYAN"
+  dd_output=$(dd if="$src_dev" of="$dst_dev" 2>&1 | tee /dev/tty)
+  if echo "$dd_output" | grep -iq "error\|can't"; then
+    print_message "Ошибка при копировании конфигурации" "$RED"
+    return 1
+  fi
+
+  return 0
+}
+
+set_boot_slot() {
+  local new_slot="$1"
+  local current_slot="$2"
+
+  if [ -z "$new_slot" ] || [ -z "$current_slot" ]; then
+    print_message "Неизвестные значения слотов (current: $current_slot, new: $new_slot)" "$RED"
+    return 1
+  fi
+
+  if ! echo "$new_slot" | grep -qE '^[0-9]+$'; then
+    print_message "Некорректный новый слот: $new_slot" "$RED"
+    return 1
+  fi
+
+  echo "$new_slot" >/proc/dual_image/boot_active || return 1
+  echo "$current_slot" >/proc/dual_image/boot_backup || true
+  echo 0 >/proc/dual_image/boot_fails || true
+  echo 0 >/proc/dual_image/commit || true
+
+  return 0
+}
+
+switch_boot_slot() {
+  local current_slot new_slot
+  current_slot="$(get_boot_current)"
+
+  case "$current_slot" in
+  1) new_slot=2 ;;
+  2) new_slot=1 ;;
+  *)
+    print_message "Неподдерживаемое значение слота: $current_slot" "$RED"
+    exit_function
+    ;;
+  esac
+
+  read -p "Текущий слот: $current_slot. Сменить на $new_slot? (y/n) " confirm_switch
+  confirm_switch=$(echo "$confirm_switch" | tr -d ' \n\r')
+  case "$confirm_switch" in
+  y | Y) ;;
+  *)
+    exit_function
+    ;;
+  esac
+
+  print_message "Переключаю слот $current_slot на $new_slot" "$CYAN"
+
+  if ! copy_dual_config "$current_slot" "$new_slot"; then
+    print_message "Ошибка при копировании конфигурации, слот не будет переключён." "$RED"
+    exit_function
+  fi
+
+  if set_boot_slot "$new_slot" "$current_slot"; then
+    print_message "Слот успешно переключен на $new_slot. Для применения требуется перезагрузка." "$GREEN"
+    read -p "Перезагрузить роутер? (y/n) " reboot_ans
+    reboot_ans=$(echo "$reboot_ans" | tr -d ' \n\r')
+    case "$reboot_ans" in
+    y | Y)
+      reboot
+      ;;
+    *) ;;
+
+    esac
+  else
+    print_message "Ошибка при переключении слота" "$RED"
+  fi
+
+  exit_function
 }
 
 get_ndm_storage() {
@@ -590,24 +712,13 @@ script_update() {
       ln -s "$OPT_DIR/$SCRIPT" "$OPT_DIR/bin/keenkit"
     fi
     print_message "Скрипт успешно обновлён" "$GREEN"
-    $OPT_DIR/$SCRIPT post_update
+    sleep 1
+    $OPT_DIR/$SCRIPT
   else
     response=$(curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" | head -n1)
     print_message "Ошибка $response при обновлении скрипта" "$RED"
     exit_function
   fi
-}
-
-url() {
-  URL=$(echo "aHR0cHM6Ly9sb2cuc3BhdGl1bS5uZXRjcmF6ZS5wcm8=" | base64 -d)
-  echo "${URL}"
-}
-
-post_update() {
-  URL=$(url)
-  JSON_DATA="{\"script_update\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s --fail --max-time 2 --retry 0
-  main_menu
 }
 
 internet_checker() {
@@ -647,13 +758,6 @@ show_progress() {
     sleep 1
   done
   printf "\n"
-}
-
-get_ota_fw_name() {
-  local FILE="$1"
-  URL=$(url)
-  JSON_DATA="{\"filename\": \"$FILE\", \"version\": \"$SCRIPT_VERSION\"}"
-  curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$URL" -o /dev/null -s --fail --max-time 2 --retry 0
 }
 
 ota_update() {
@@ -771,7 +875,6 @@ ota_update() {
     case "$CONFIRM" in
     y | Y)
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
-      get_ota_fw_name "$FILE"
       print_message "Прошивка успешно обновлена" "$GREEN"
       ;;
     n | N)
@@ -783,13 +886,13 @@ ota_update() {
     esac
     rm -f "$DOWNLOAD_PATH/$FILE"
     rm -f "$DOWNLOAD_PATH/md5sum"
-    print_message "Перезагружаю устройство..." "${CYAN}"
     sleep 1
+    print_message "Перезагружаю устройство..." "${CYAN}"
     reboot
   fi
 }
 
-update_firmware_block() {
+update_firmware_block_legacy() {
   local firmware="$1"
   local use_mount="$2"
   backup_config
@@ -814,6 +917,74 @@ update_firmware_block() {
 
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     umountFS
+  fi
+}
+
+update_firmware_block_dual() {
+  local firmware="$1"
+  local use_mount="$2"
+  local current_slot new_slot
+  local fw_slot1 fw_slot2
+  local target_fw_slot
+
+  backup_config
+  current_slot="$(get_boot_current)"
+  if ! echo "$current_slot" | grep -qE '^[12]$'; then
+    print_message "Не удалось определить текущий слот: $current_slot. Использую стандартный режим обновления." "$RED"
+    update_firmware_block_legacy "$firmware" "$use_mount"
+    return
+  fi
+
+  fw_slot1=$(grep -w 'Firmware_1' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  fw_slot2=$(grep -w 'Firmware_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+
+  if [ -z "$fw_slot1" ] || [ -z "$fw_slot2" ]; then
+    print_message "Не найдены разделы Firmware_1/Firmware_2. Использую стандартный режим обновления." "$RED"
+    update_firmware_block_legacy "$firmware" "$use_mount"
+    return
+  fi
+
+  case "$current_slot" in
+  1)
+    new_slot=2
+    target_fw_slot="$fw_slot2"
+    ;;
+  2)
+    new_slot=1
+    target_fw_slot="$fw_slot1"
+    ;;
+  esac
+
+  print_message "Текущий слот: $current_slot. Записываю прошивку в слот: $new_slot" "$CYAN"
+  perform_dd "$firmware" "/dev/mtdblock$target_fw_slot"
+
+  if ! copy_dual_config "$current_slot" "$new_slot"; then
+    print_message "Ошибка при копировании конфигурации, слот не будет переключён на $new_slot." "$RED"
+    return 1
+  fi
+
+  print_message "Переключаюсь на $new_slot слот" "$CYAN"
+  if ! set_boot_slot "$new_slot" "$current_slot"; then
+    print_message "Не удалось переключить слот на $new_slot." "$RED"
+    return 1
+  fi
+}
+
+update_firmware_block() {
+  local firmware="$1"
+  local use_mount="$2"
+  local arch
+  arch="$(get_architecture)"
+
+  if [ "$arch" = "aarch64" ] && get_host; then
+    update_firmware_block_legacy "$firmware" "$use_mount"
+  else
+  read -p "Использовать новый dual-режим обновления? (y/n) " rc1
+  rc1=$(echo "$rc1" | tr -d ' \n\r')
+  case "$rc1" in
+  y | Y) update_firmware_block_dual "$firmware" "$use_mount" ;;
+  *) update_firmware_block_legacy "$firmware" "$use_mount" ;;
+  esac
   fi
 }
 
@@ -859,7 +1030,6 @@ firmware_manual_update() {
   fi
 
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
-
   exit_main_menu
   read -p "Выберите файл обновления (от 1 до $count): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
@@ -1175,8 +1345,6 @@ cleanup() {
 
 if [ "$1" = "script_update" ]; then
   script_update
-elif [ "$1" = "post_update" ]; then
-  post_update
 else
   main_menu
 fi
