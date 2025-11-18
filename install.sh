@@ -20,7 +20,7 @@ packages_checker() {
     fi
   done
   if [ -n "$missing" ]; then
-    print_message "Устанавливаем:$missing"
+    print_message "Installing: $missing"
     opkg update >/dev/null 2>&1
     opkg install $missing
     echo ""
@@ -28,7 +28,7 @@ packages_checker() {
 }
 
 packages_checker curl tar findutils
-curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
+curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/main-english/$SCRIPT" --output $TMP_DIR/$SCRIPT
 mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
 chmod +x $OPT_DIR/$SCRIPT
 cd $OPT_DIR/bin
