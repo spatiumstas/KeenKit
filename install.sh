@@ -4,6 +4,7 @@ REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
+BRANCH="main"
 
 print_message() {
   local message="$1"
@@ -27,8 +28,8 @@ packages_checker() {
   fi
 }
 
-packages_checker curl tar findutils
-curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/main/$SCRIPT" --output $TMP_DIR/$SCRIPT
+packages_checker curl tar findutils jq
+curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
 chmod +x $OPT_DIR/$SCRIPT
 cd $OPT_DIR/bin
