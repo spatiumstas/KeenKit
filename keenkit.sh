@@ -12,8 +12,9 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.4"
+SCRIPT_VERSION="2.5"
 MIN_RAM_SIZE="256"
+MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
 
@@ -37,6 +38,10 @@ EOF
   printf "${CYAN}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
   printf "${CYAN}OPKG:           ${NC}%s\n" "$(get_opkg_storage)"
   printf "${CYAN}Время работы:   ${NC}%s\n" "$(get_uptime)"
+  if get_repeaters_info=$(get_mws_members); [ -n "$get_repeaters_info" ]; then
+    printf "${CYAN}Ретрансляторы:  ${NC}"
+    printf "%b\n" "$get_repeaters_info"
+  fi
   printf "${CYAN}Версия:         ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
@@ -92,6 +97,27 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
+print_models_with_highlight() {
+  local models="$1"
+  local current_model="$2"
+  
+  local i=1
+  while IFS= read -r model; do
+    local model_lower=$(echo "$model" | tr '[:upper:]' '[:lower:]')
+    local current_lower=$(echo "$current_model" | tr '[:upper:]' '[:lower:]')
+    
+    if [[ "$model_lower" == *"$current_lower"* ]] || \
+       [[ "$current_lower" == *"$model_lower"* ]]; then
+      printf "${CYAN}%d. %s${NC}\n" "$i" "$model"
+    else
+      printf "%d. %s\n" "$i" "$model"
+    fi
+    i=$((i + 1))
+  done <<EOF
+$models
+EOF
+}
+
 rci_request() {
   local endpoint="$1"
   curl -s "http://localhost:79/rci/$endpoint"
@@ -109,18 +135,75 @@ get_hw_id() {
   rci_request "show/version" | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
-get_uptime() {
-  local uptime=$(rci_request "show/system" | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
+format_uptime_seconds() {
+  local uptime=$1
+  if [ -z "$uptime" ] || ! echo "$uptime" | grep -qE '^[0-9]+$'; then
+    return
+  fi
   local days=$((uptime / 86400))
   local hours=$(((uptime % 86400) / 3600))
   local minutes=$(((uptime % 3600) / 60))
   local seconds=$((uptime % 60))
 
   if [ "$days" -gt 0 ]; then
-    printf "%d дн. %02d:%02d:%02d\n" "$days" "$hours" "$minutes" "$seconds"
+    printf "%d дн. %02d:%02d:%02d" "$days" "$hours" "$minutes" "$seconds"
   else
-    printf "%02d:%02d:%02d\n" "$hours" "$minutes" "$seconds"
+    printf "%02d:%02d:%02d" "$hours" "$minutes" "$seconds"
   fi
+}
+
+get_uptime() {
+  local uptime=$(rci_request "show/system" | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
+  format_uptime_seconds "$uptime"
+}
+
+get_mws_members() {
+  local mws_json=$(rci_request "show/mws/member")
+  local result=""
+  
+  if ! command -v jq >/dev/null 2>&1; then
+    return
+  fi
+
+  if [ -z "$mws_json" ] || [[ "$mws_json" != \[* ]]; then
+    return
+  fi
+  
+  local repeater_data
+  repeater_data=$(echo "$mws_json" | jq -r '
+    .[] | 
+    select(.model != null) |
+    "\(.model)|" +
+    "\(.fw // "null")|" +
+    "\(.system.uptime // "0")|" +
+    "\(.backhaul.txrate // .backhaul.speed // "0")"' 2>/dev/null)
+
+  if [ -z "$repeater_data" ]; then
+    return
+  fi
+
+  local first=true
+  while IFS='|' read -r model fw uptime speed; do
+    local output_line=""
+    
+    if [ "$fw" != "null" ]; then
+      local uptime_formatted=$(format_uptime_seconds "$uptime")
+      output_line=$(printf "%s | %s | %s Мбит/с | %s" "$model" "$fw" "$speed" "$uptime_formatted")
+    else
+      output_line=$(printf "%s | ${RED}Не в сети${NC}" "$model")
+    fi
+    
+    if [ "$first" = "true" ]; then
+      result="${output_line}"
+      first=false
+    else
+      result="${result}\n                ${output_line}"
+    fi
+  done <<EOF
+$repeater_data
+EOF
+
+  echo "$result"
 }
 
 get_ram_usage() {
@@ -700,7 +783,7 @@ exit_main_menu() {
 }
 
 script_update() {
-  packages_checker "curl"
+  packages_checker "curl jq"
   BRANCH="$1"
   curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 
@@ -717,13 +800,6 @@ script_update() {
   else
     response=$(curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" | head -n1)
     print_message "Ошибка $response при обновлении скрипта" "$RED"
-    exit_function
-  fi
-}
-
-internet_checker() {
-  if ! ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
-    print_message "Нет доступа к интернету. Проверьте подключение." "$RED"
     exit_function
   fi
 }
@@ -762,8 +838,7 @@ show_progress() {
 
 ota_update() {
   check_host
-  packages_checker "curl findutils"
-  internet_checker
+  packages_checker "curl findutils jq"
   osvault="$(get_osvault)/osvault"
   REQUEST=$(curl -L -s "$osvault")
   DIRS=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
@@ -775,12 +850,10 @@ ota_update() {
     exit_function
   fi
 
+  local current_device_model=$(get_device)
   echo "Доступные модели:"
-  i=1
-  echo "$DIRS" | while IFS= read -r DIR; do
-    printf "%d. %s\n" "$i" "$DIR"
-    i=$((i + 1))
-  done
+  print_models_with_highlight "$DIRS" "$current_device_model"
+  
   exit_main_menu
   dir_count=$(echo "$DIRS" | wc -l)
   while true; do
@@ -976,10 +1049,24 @@ update_firmware_block() {
   local arch
   arch="$(get_architecture)"
 
+  if [ "$arch" = "aarch64" ]; then
+    local ram_size=$(get_ram_size)
+    if [ "$ram_size" -lt "$MIN_RAM_SIZE_AARCH64" ]; then
+      print_message "Мало оперативной памяти ($ram_size MB)" "$RED"
+      read -p "Рекомендуется обновление через загрузчик. Продолжить? (y/n) " confirm
+      confirm=$(echo "$confirm" | tr -d ' \n\r')
+      case "$confirm" in
+      y | Y) ;;
+      n | N) exit_function ;;
+      *) ;; 
+      esac
+    fi
+  fi
+
   if [ "$arch" = "aarch64" ] && get_host; then
     update_firmware_block_legacy "$firmware" "$use_mount"
   else
-  read -p "Использовать новый dual-режим обновления? (y/n) " rc1
+  read -p "Использовать dual-boot режим обновления? (Для уверенных пользователей) (y/n) " rc1
   rc1=$(echo "$rc1" | tr -d ' \n\r')
   case "$rc1" in
   y | Y) update_firmware_block_dual "$firmware" "$use_mount" ;;
