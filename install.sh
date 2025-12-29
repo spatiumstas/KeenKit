@@ -4,7 +4,7 @@ REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
-BRANCH="main"
+BRANCH="main-english"
 
 print_message() {
   local message="$1"
@@ -21,7 +21,7 @@ packages_checker() {
     fi
   done
   if [ -n "$missing" ]; then
-    print_message "Устанавливаем:$missing"
+    print_message "Install:$missing"
     opkg update >/dev/null 2>&1
     opkg install $missing
     echo ""
