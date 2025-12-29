@@ -5,7 +5,7 @@ RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
-BRANCH="main"
+BRANCH="main-english"
 USERNAME="spatiumstas"
 USER='root'
 REPO="KeenKit"
@@ -31,40 +31,40 @@ print_menu() {
 
 EOF
   arch="$(get_architecture)"
-  printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (слот: "$(get_boot_current)")"
-  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($arch) | $(get_temperature)"
+  printf "${CYAN}Model:     ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (slot: "$(get_boot_current)")"
+  printf "${CYAN}CPU:       ${NC}%s\n" "$(get_cpu_model) ($arch) | $(get_temperature)"
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
-    printf "${CYAN}Модем:          ${NC}%s\n" "$get_modem_info"
+    printf "${CYAN}Modem:     ${NC}%s\n" "$get_modem_info"
   fi
-  printf "${CYAN}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
-  printf "${CYAN}OPKG:           ${NC}%s\n" "$(get_opkg_storage)"
-  printf "${CYAN}Время работы:   ${NC}%s\n" "$(get_uptime)"
+  printf "${CYAN}RAM:       ${NC}%s\n" "$(get_ram_usage)"
+  printf "${CYAN}OPKG:      ${NC}%s\n" "$(get_opkg_storage)"
+  printf "${CYAN}Uptime:    ${NC}%s\n" "$(get_uptime)"
   if get_repeaters_info=$(get_mws_members); [ -n "$get_repeaters_info" ]; then
-    printf "${CYAN}Ретрансляторы:  ${NC}"
+    printf "${CYAN}Repeaters: ${NC}"
     printf "%b\n" "$get_repeaters_info"
   fi
-  printf "${CYAN}Версия:         ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
-  echo "1. Обновить прошивку из файла"
-  echo "2. Бэкап разделов"
-  echo "3. Бэкап Entware"
+  printf "${CYAN}Version:   ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
+  echo "1. Update Firmware from File"
+  echo "2. Backup sections"
+  echo "3. Backup  Entware"
   if get_host; then
-    echo "4. Заменить раздел"
+    echo "4. Replace section"
     echo "5. OTA Update"
-    echo "6. Заменить сервисные данные"
+    echo "6. Replace service data"
   fi
   if ! { [ "$arch" = "aarch64" ] && get_host; }; then
-    echo "7. Переключить слот"
+    echo "7. Switch Slot"
   fi
-  printf "\n77. Change language"
-  printf "\n88. Удалить используемые пакеты\n"
-  echo "99. Обновить скрипт"
-  echo "00. Выход"
+  printf "\n77. Сменить язык"
+  printf "\n88. Delete used packages\n"
+  echo "99. Update Script"
+  echo "00. Quit"
   echo ""
 }
 
 main_menu() {
   print_menu
-  read -p "Выберите действие: " choice
+  read -p "Select action: " choice
   echo ""
   choice=$(echo "$choice" | tr -d '\032' | tr -d '[A-Z]')
 
@@ -84,7 +84,7 @@ main_menu() {
     88) packages_delete ;;
     99) script_update;;
     *)
-      echo "Неверный выбор. Попробуйте снова."
+      echo "Invalid selection, please try again."
       sleep 1
       main_menu
       ;;
@@ -148,7 +148,7 @@ format_uptime_seconds() {
   local seconds=$((uptime % 60))
 
   if [ "$days" -gt 0 ]; then
-    printf "%d дн. %02d:%02d:%02d" "$days" "$hours" "$minutes" "$seconds"
+    printf "%d day. %02d:%02d:%02d" "$days" "$hours" "$minutes" "$seconds"
   else
     printf "%02d:%02d:%02d" "$hours" "$minutes" "$seconds"
   fi
@@ -190,9 +190,9 @@ get_mws_members() {
     
     if [ "$fw" != "null" ]; then
       local uptime_formatted=$(format_uptime_seconds "$uptime")
-      output_line=$(printf "%s | %s | %s Мбит/с | %s" "$model" "$fw" "$speed" "$uptime_formatted")
+      output_line=$(printf "%s | %s | %s Mbit/с | %s" "$model" "$fw" "$speed" "$uptime_formatted")
     else
-      output_line=$(printf "%s | ${RED}Не в сети${NC}" "$model")
+      output_line=$(printf "%s | ${RED}offline PED${NC}" "$model")
     fi
     
     if [ "$first" = "true" ]; then
@@ -298,7 +298,7 @@ copy_dual_config() {
   cfg_slot2=$(grep -w 'Config_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
 
   if [ -z "$cfg_slot1" ] || [ -z "$cfg_slot2" ]; then
-    print_message "Разделы Config_1/Config_2 не найдены, копирование конфигурации невозможно." "$RED"
+    print_message "Sections Config_1/Config_2 not found, configuration cannot be copied." "$RED"
     return 1
   fi
 
@@ -327,10 +327,10 @@ copy_dual_config() {
     ;;
   esac
 
-  print_message "Копирую конфигурацию: Config_$current_slot → Config_$new_slot" "$CYAN"
+  print_message "Copy Configuration: Config_$current_slot → Config_$new_slot" "$CYAN"
   dd_output=$(dd if="$src_dev" of="$dst_dev" 2>&1 | tee /dev/tty)
   if echo "$dd_output" | grep -iq "error\|can't"; then
-    print_message "Ошибка при копировании конфигурации" "$RED"
+    print_message "Error copying configuration" "$RED"
     return 1
   fi
 
@@ -342,12 +342,12 @@ set_boot_slot() {
   local current_slot="$2"
 
   if [ -z "$new_slot" ] || [ -z "$current_slot" ]; then
-    print_message "Неизвестные значения слотов (current: $current_slot, new: $new_slot)" "$RED"
+    print_message "Unknown slot values (current: $current_slot, new: $new_slot)" "$RED"
     return 1
   fi
 
   if ! echo "$new_slot" | grep -qE '^[0-9]+$'; then
-    print_message "Некорректный новый слот: $new_slot" "$RED"
+    print_message "Invalid new slot: $new_slot" "$RED"
     return 1
   fi
 
@@ -367,12 +367,12 @@ switch_boot_slot() {
   1) new_slot=2 ;;
   2) new_slot=1 ;;
   *)
-    print_message "Неподдерживаемое значение слота: $current_slot" "$RED"
+    print_message "Unsupported slot value: $current_slot" "$RED"
     exit_function
     ;;
   esac
 
-  read -p "Текущий слот: $current_slot. Сменить на $new_slot? (y/n) " confirm_switch
+  read -p "Current Slot: $current_slot. Change helmet-mounted device $new_slot? (y/n) " confirm_switch
   confirm_switch=$(echo "$confirm_switch" | tr -d ' \n\r')
   case "$confirm_switch" in
   y | Y) ;;
@@ -381,16 +381,16 @@ switch_boot_slot() {
     ;;
   esac
 
-  print_message "Переключаю слот $current_slot на $new_slot" "$CYAN"
+  print_message "Switching the slot $current_slot wipers $new_slot" "$CYAN"
 
   if ! copy_dual_config "$current_slot" "$new_slot"; then
-    print_message "Ошибка при копировании конфигурации, слот не будет переключён." "$RED"
+    print_message "Error copying configuration, slot will not be switched." "$RED"
     exit_function
   fi
 
   if set_boot_slot "$new_slot" "$current_slot"; then
-    print_message "Слот успешно переключен на $new_slot. Для применения требуется перезагрузка." "$GREEN"
-    read -p "Перезагрузить роутер? (y/n) " reboot_ans
+    print_message "Slot successfully switched to $new_slot. A reboot is required to apply." "$GREEN"
+    read -p "Restart your router? (y/n) " reboot_ans
     reboot_ans=$(echo "$reboot_ans" | tr -d ' \n\r')
     case "$reboot_ans" in
     y | Y)
@@ -400,7 +400,7 @@ switch_boot_slot() {
 
     esac
   else
-    print_message "Ошибка при переключении слота" "$RED"
+    print_message "Error switching slot" "$RED"
   fi
 
   exit_function
@@ -480,14 +480,14 @@ get_modem() {
     carrier=$(echo "$info" | awk '
       /carrier, id =/ {in_carrier=1; band=""; bw=""; if (count++) printf " + "; next}
       in_carrier && /band:/ {band=$2}
-      in_carrier && /bandwidth:/ {bw=$2; in_carrier=0; if(band) {printf "B%s", band; if(bw) printf "@%s МГц", bw}}
+      in_carrier && /bandwidth:/ {bw=$2; in_carrier=0; if(band) {printf "B%s", band; if(bw) printf "@%s MHz", bw}}
     ')
     if [ -z "$carrier" ]; then
       band=$(echo "$info" | awk -F': ' '/band:/ {print $2; exit}')
       bandwidth=$(echo "$info" | awk -F': ' '/bandwidth:/ {print $2; exit}')
       if [ -n "$band" ]; then
         carrier="B${band}"
-        [ -n "$bandwidth" ] && carrier="${carrier}@${bandwidth} МГц"
+        [ -n "$bandwidth" ] && carrier="${carrier}@${bandwidth} MHz"
       fi
     fi
     modem_name="$product"
@@ -553,7 +553,7 @@ packages_checker() {
   done
 
   if [ -n "$missing" ]; then
-    print_message "Устанавливаем:$missing" "$GREEN"
+    print_message "Install:$missing" "$GREEN"
     opkg update >/dev/null 2>&1
     opkg install $missing $flag
     echo ""
@@ -574,15 +574,15 @@ packages_delete() {
   done
 
   if [ -n "$removed_packages" ]; then
-    print_message "Пакеты успешно удалены:$removed_packages" "$GREEN"
+    print_message "Packages successfully deleted:$removed_packages" "$GREEN"
   fi
 
   if [ -n "$failed_packages" ]; then
-    print_message "Следующие пакеты не были удалены из-за зависимостей:$failed_packages" "$RED"
+    print_message "The following packages were not deleted due to dependencies:$failed_packages" "$RED"
   fi
 
   if [ -z "$removed_packages" ] && [ -z "$failed_packages" ]; then
-    print_message "Используемые пакеты не установлены" "$CYAN"
+    print_message "The packages used are not installed" "$CYAN"
   fi
 
   exit_function
@@ -596,7 +596,7 @@ perform_dd() {
   output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
 
   if echo "$output" | grep -iq "error\|can't"; then
-    print_message "Ошибка при перезаписи раздела" "$RED"
+    print_message "Error overwriting partition" "$RED"
     umountFS
     exit_function
   fi
@@ -625,7 +625,7 @@ checking_mtd_size() {
     echo "$file_size" | grep -qE '^[0-9]+$' || return 0
 
     if [ "$file_size" -gt "$part_size" ]; then
-      print_message "Файл больше выбранного раздела" "$RED"
+      print_message "File is larger than the selected partition" "$RED"
       umount /tmp >/dev/null 2>&1
       exit_function
       return 1
@@ -644,12 +644,12 @@ select_drive() {
   current_manufacturer=""
 
   if [ -z "$media_output" ]; then
-    print_message "Не удалось получить список накопителей" "$RED"
+    print_message "Getting list failed." "$RED"
     return 1
   fi
 
-  echo "0. Временное хранилище (tmp)"
-  echo "1. Встроенное хранилище ($(get_internal_storage_size))"
+  echo "0. Temporary Store (tmp)"
+  echo "1. On-Box Storage ($(get_internal_storage_size))"
 
   while IFS= read -r line; do
     case "$line" in
@@ -716,12 +716,12 @@ EOF
     if [ -n "$uuids" ]; then
       selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice-1]}')
       if [ -z "$selected_drive" ]; then
-        print_message "Неверный выбор" "$RED"
+        print_message "Invalid selection" "$RED"
         exit_function
       fi
       selected_drive="/tmp/mnt/$selected_drive"
     else
-      print_message "Неверный выбор" "$RED"
+      print_message "Invalid selection" "$RED"
       exit_function
     fi
     ;;
@@ -741,14 +741,14 @@ has_an_external_storage() {
 
 backup_config() {
   if has_an_external_storage; then
-    print_message "Обнаружены внешние накопители" "$CYAN"
-    read -p "Создать бэкап startup-config? (y/n) " user_input
+    print_message "External drives detected" "$CYAN"
+    read -p "Create backup startup-config? (y/n) " user_input
     user_input=$(echo "$user_input" | tr -d ' \n\r')
 
     case "$user_input" in
     y | Y)
       echo ""
-      select_drive "Выберите накопитель для бэкапа:"
+      select_drive "Select backup drive:"
 
       if [ -n "$selected_drive" ]; then
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
@@ -758,12 +758,12 @@ backup_config() {
         ndmc -c "copy startup-config $backup_file"
 
         if [ $? -eq 0 ]; then
-          print_message "Startup-config сохранен в $backup_file" "$GREEN"
+          print_message "Startup-config saved to $backup_file" "$GREEN"
         else
-          print_message "Ошибка при сохранении бэкапа" "$RED"
+          print_message "Error saving backup" "$RED"
         fi
       else
-        echo "Бэкап не выполнен, накопитель не выбран."
+        echo "Backup failed, drive not selected."
       fi
       ;;
     *)
@@ -775,13 +775,13 @@ backup_config() {
 
 exit_function() {
   echo ""
-  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+  read -n 1 -s -r -p "Press any key to return..."
   pkill -P $$ 2>/dev/null
   exec "$OPT_DIR/$SCRIPT"
 }
 
 exit_main_menu() {
-  printf "\n${CYAN}00. Выход в главное меню${NC}\n\n"
+  printf "\n${CYAN}00. Exit to the main menu${NC}\n\n"
 }
 
 script_update() {
@@ -795,12 +795,12 @@ script_update() {
       cd $OPT_DIR/bin
       ln -s "$OPT_DIR/$SCRIPT" "$OPT_DIR/bin/keenkit"
     fi
-    print_message "Скрипт успешно обновлён" "$GREEN"
+    print_message "Script updated successfully" "$GREEN"
     sleep 1
     $OPT_DIR/$SCRIPT
   else
     response=$(curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" | head -n1)
-    print_message "Ошибка $response при обновлении скрипта" "$RED"
+    print_message "Error $response when updating the script" "$RED"
     exit_function
   fi
 }
@@ -830,7 +830,7 @@ show_progress() {
     if [ -f "$file_path" ]; then
       downloaded=$(ls -l "$file_path" | awk '{print $5}')
       progress=$((downloaded * 100 / total_size))
-      printf "\rЗагружаю $file_path... (%d%%)" "$progress"
+      printf "\rLoading... $file_path... (%d%%)" "$progress"
     fi
     sleep 1
   done
@@ -847,25 +847,25 @@ ota_update() {
   if [ -z "$DIRS" ]; then
     status_line=$(wget -S --spider -O /dev/null "$osvault" 2>&1 | grep 'HTTP/' | tail -n1)
     http_text=$(echo "$status_line" | cut -d' ' -f3-)
-    print_message "Ошибка $http_text при получении данных, попробуйте позже" "$RED"
+    print_message "Error $http_text when receiving data, try again later" "$RED"
     exit_function
   fi
 
   local current_device_model=$(get_device)
-  echo "Доступные модели:"
+  echo "Models available:"
   print_models_with_highlight "$DIRS" "$current_device_model"
   
   exit_main_menu
   dir_count=$(echo "$DIRS" | wc -l)
   while true; do
-    read -p "Выберите модель (от 1 до $dir_count): " DIR_NUM
+    read -p "Select Model (-1 to No.  $dir_count): " DIR_NUM
     if [ "$DIR_NUM" = "00" ]; then
       main_menu
     fi
     if echo "$DIR_NUM" | grep -qE '^[0-9]+$' && [ "$DIR_NUM" -ge 1 ] && [ "$DIR_NUM" -le "$dir_count" ]; then
       break
     else
-      print_message "Неверный выбор. Выберите от 1 до $dir_count." "$RED"
+      print_message "Invalid selection, please select between 1 and $dir_count." "$RED"
     fi
   done
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
@@ -875,10 +875,10 @@ ota_update() {
   BIN_FILES=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep '\.bin$' | sed 's|%20| |g')
 
   if [ -z "$BIN_FILES" ]; then
-    printf "${RED}В директории $DIR нет файлов.${NC}\n"
+    printf "${RED}In the directory $DIR No files.${NC}\n"
     exit_function
   else
-    printf "\nПрошивки для $DIR:\n"
+    printf "\nFirmware for $DIR:\n"
     i=1
     echo "$BIN_FILES" | while IFS= read -r FILE; do
       printf "%d. ${CYAN}%s${NC}\n" "$i" "$FILE"
@@ -887,7 +887,7 @@ ota_update() {
     exit_main_menu
     file_count=$(echo "$BIN_FILES" | wc -l)
     while true; do
-      read -p "Выберите прошивку (от 1 до $file_count): " FILE_NUM
+      read -p "Select Firmware (-1 to No.  $file_count): " FILE_NUM
       if [ "$FILE_NUM" = "00" ]; then
         unset FILE
         unset DOWNLOAD_PATH
@@ -899,14 +899,14 @@ ota_update() {
       if echo "$FILE_NUM" | grep -qE '^[0-9]+$' && [ "$FILE_NUM" -ge 1 ] && [ "$FILE_NUM" -le "$file_count" ]; then
         break
       else
-        print_message "Неверный выбор. Выберите от 1 до $file_count." "$RED"
+        print_message "Invalid selection, please select between 1 and $file_count." "$RED"
       fi
     done
     FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
     FILE_ENCODED=$(echo "$FILE" | sed 's/ /%20/g')
 
     if [ -z "$FILE" ]; then
-      print_message "Файл не выбран" "$RED"
+      print_message "No file chosen" "$RED"
       exit_function
     fi
     total_size=$(curl -sIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
@@ -927,7 +927,7 @@ ota_update() {
     curl -L --silent "$osvault/$DIR_ENCODED/$FILE_ENCODED" --output "$DOWNLOAD_PATH/$FILE"
     wait $progress_pid
     if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
-      printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
+      printf "${RED}File $FILE File has not been loaded/found.${NC}\n"
       exit_function
     fi
 
@@ -936,20 +936,20 @@ ota_update() {
     MD5SUM_LOCAL=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
     if [ "$MD5SUM_REMOTE" != "$MD5SUM_LOCAL" ]; then
-      printf "${RED}MD5 хеш не совпадает.${NC}\n"
-      echo "Ожидаемый: $MD5SUM_REMOTE"
-      echo "Фактический: $MD5SUM_LOCAL"
+      printf "${RED}MD5 Hash does not match..${NC}\n"
+      echo "Pending: $MD5SUM_REMOTE"
+      echo "Actual: $MD5SUM_LOCAL"
       rm -f "$DOWNLOAD_PATH/$FILE"
       rm -f "$DOWNLOAD_PATH/md5sum"
       exit_function
     fi
 
-    printf "${GREEN}MD5 хеш совпадает${NC}\n\n"
-    read -p "$(printf "Выбран ${GREEN}$FILE${NC} для обновления, всё верно? (y/n) ")" CONFIRM
+    printf "${GREEN}MD5 hash matches${NC}\n\n"
+    read -p "$(printf "Hired! ${GREEN}$FILE${NC} to update, that's right? (y/n) ")" CONFIRM
     case "$CONFIRM" in
     y | Y)
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
-      print_message "Прошивка успешно обновлена" "$GREEN"
+      print_message "Firmware updated successfully" "$GREEN"
       ;;
     n | N)
       rm -f "$DOWNLOAD_PATH/$FILE"
@@ -961,7 +961,7 @@ ota_update() {
     rm -f "$DOWNLOAD_PATH/$FILE"
     rm -f "$DOWNLOAD_PATH/md5sum"
     sleep 1
-    print_message "Перезагружаю устройство..." "${CYAN}"
+    print_message "Rebooting the device..." "${CYAN}"
     reboot
   fi
 }
@@ -983,7 +983,7 @@ update_firmware_block_legacy() {
       sleep 1
     else
       result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
-      echo "Обновляю $partition..."
+      echo "Updating $partition..."
       perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
     fi
@@ -1004,7 +1004,7 @@ update_firmware_block_dual() {
   backup_config
   current_slot="$(get_boot_current)"
   if ! echo "$current_slot" | grep -qE '^[12]$'; then
-    print_message "Не удалось определить текущий слот: $current_slot. Использую стандартный режим обновления." "$RED"
+    print_message "Failed to determine current slot: $current_slot. I use the standard update mode." "$RED"
     update_firmware_block_legacy "$firmware" "$use_mount"
     return
   fi
@@ -1013,7 +1013,7 @@ update_firmware_block_dual() {
   fw_slot2=$(grep -w 'Firmware_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
 
   if [ -z "$fw_slot1" ] || [ -z "$fw_slot2" ]; then
-    print_message "Не найдены разделы Firmware_1/Firmware_2. Использую стандартный режим обновления." "$RED"
+    print_message "No Sections found Firmware_1/Firmware_2. I use the standard update mode." "$RED"
     update_firmware_block_legacy "$firmware" "$use_mount"
     return
   fi
@@ -1029,17 +1029,17 @@ update_firmware_block_dual() {
     ;;
   esac
 
-  print_message "Текущий слот: $current_slot. Записываю прошивку в слот: $new_slot" "$CYAN"
+  print_message "Current Slot: $current_slot. Writing the firmware into the slot: $new_slot" "$CYAN"
   perform_dd "$firmware" "/dev/mtdblock$target_fw_slot"
 
   if ! copy_dual_config "$current_slot" "$new_slot"; then
-    print_message "Ошибка при копировании конфигурации, слот не будет переключён на $new_slot." "$RED"
+    print_message "Error copying configuration, slot will not be switched to $new_slot." "$RED"
     return 1
   fi
 
-  print_message "Переключаюсь на $new_slot слот" "$CYAN"
+  print_message "Switching to $new_slot slot" "$CYAN"
   if ! set_boot_slot "$new_slot" "$current_slot"; then
-    print_message "Не удалось переключить слот на $new_slot." "$RED"
+    print_message "Failed to switch slot to $new_slot." "$RED"
     return 1
   fi
 }
@@ -1053,8 +1053,8 @@ update_firmware_block() {
   if [ "$arch" = "aarch64" ]; then
     local ram_size=$(get_ram_size)
     if [ "$ram_size" -lt "$MIN_RAM_SIZE_AARCH64" ]; then
-      print_message "Мало оперативной памяти ($ram_size MB)" "$RED"
-      read -p "Рекомендуется обновление через загрузчик. Продолжить? (y/n) " confirm
+      print_message "Low RAM ($ram_size MB)" "$RED"
+      read -p "We recommend updating via bootloader. Continue? (y/n) " confirm
       confirm=$(echo "$confirm" | tr -d ' \n\r')
       case "$confirm" in
       y | Y) ;;
@@ -1067,7 +1067,7 @@ update_firmware_block() {
   if [ "$arch" = "aarch64" ] && get_host; then
     update_firmware_block_legacy "$firmware" "$use_mount"
   else
-  read -p "Использовать dual-boot режим обновления? (Для уверенных пользователей) (y/n) " rc1
+  read -p "To Use dual-boot Update mode? (For confident users) (y/n) " rc1
   rc1=$(echo "$rc1" | tr -d ' \n\r')
   case "$rc1" in
   y | Y) update_firmware_block_dual "$firmware" "$use_mount" ;;
@@ -1099,12 +1099,12 @@ firmware_manual_update() {
   ram_size=$(get_ram_size)
 
   if [ "$ram_size" -lt $MIN_RAM_SIZE ]; then
-    print_message "Обновление возможно только со встроенного накопителя Entware" "$CYAN"
+    print_message "Upgrading is only possible from the built-in drive Entware" "$CYAN"
     selected_drive="$STORAGE_DIR"
     use_mount=true
   else
     output=$(mount)
-    select_drive "Выберите накопитель с размещённым файлом обновления:"
+    select_drive "Select the drive with the update file placed:"
     selected_drive="$selected_drive"
     use_mount=false
   fi
@@ -1113,33 +1113,33 @@ firmware_manual_update() {
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
-    print_message "Файл обновления не найден на накопителе" "$RED"
+    print_message "Update file not found on drive" "$RED"
     exit_function
   fi
 
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
   exit_main_menu
-  read -p "Выберите файл обновления (от 1 до $count): " choice
+  read -p "Select Update File (-1 to No.  $count): " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
   if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
-    print_message "Неверный выбор файла" "$RED"
+    print_message "Invalid File Selection" "$RED"
     exit_function
   fi
 
   Firmware=$(echo "$files" | awk "NR==$choice")
   FirmwareName=$(basename "$Firmware")
   echo ""
-  read -p "$(printf "Выбран ${GREEN}$FirmwareName${NC} для обновления, всё верно? (y/n) ")" item_rc1
+  read -p "$(printf "Hired! ${GREEN}$FirmwareName${NC} to update, that's right? (y/n) ")" item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
     update_firmware_block "$Firmware" "$use_mount"
-    print_message "Прошивка успешно обновлена" "$GREEN"
+    print_message "Firmware updated successfully" "$GREEN"
     printf "${NC}"
-    read -p "Удалить файл обновления? (y/n) " item_rc2
+    read -p "Delete update file? (y/n) " item_rc2
     item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
     case "$item_rc2" in
     y | Y)
@@ -1151,7 +1151,7 @@ firmware_manual_update() {
       ;;
     *) ;;
     esac
-    print_message "Перезагружаю устройство..." "${CYAN}"
+    print_message "Rebooting the device..." "${CYAN}"
     sleep 1
     reboot
     ;;
@@ -1161,14 +1161,14 @@ firmware_manual_update() {
 
 backup_block() {
   output=$(mount)
-  select_drive "Выберите накопитель для бэкапа:"
+  select_drive "Select backup drive:"
   mtd_output=$(cat /proc/mtd)
-  printf "\n${GREEN}Доступные разделы:${NC}\n"
+  printf "\n${GREEN}Available Sections:${NC}\n"
   echo "$mtd_output" | awk 'NR>1 {print $0}'
-  printf "99. Бэкап всех разделов${NC}\n"
+  printf "99. Backup all sections${NC}\n"
   exit_main_menu
   folder_path="$selected_drive/backup$DATE"
-  read -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice
+  read -p "Specify the number of(а) Section(RH) separated by spaces: " choice
   echo ""
   choice=$(echo "$choice" | tr -d '\n\r')
 
@@ -1189,7 +1189,7 @@ backup_block() {
         valid_parts=1
       fi
 
-      spinner_start "Копирую mtd$i.$mtd_name.bin"
+      spinner_start "Èçîáðåòàé: mtd$i.$mtd_name.bin"
       if cat "/dev/mtdblock$i" >"$folder_path/mtd$i.$mtd_name.bin"; then
         spinner_stop 0
       else
@@ -1212,7 +1212,7 @@ backup_block() {
         valid_parts=1
       fi
 
-      spinner_start "Копирую mtd$part.$selected_mtd.bin"
+      spinner_start "Èçîáðåòàé: mtd$part.$selected_mtd.bin"
       if dd if="/dev/mtd$part" of="$folder_path/mtd$part.$selected_mtd.bin" >/dev/null 2>&1; then
         spinner_stop 0
       else
@@ -1223,14 +1223,14 @@ backup_block() {
   fi
 
   if [ -n "$non_existent_parts" ]; then
-    print_message "Ошибка: Раздела${non_existent_parts} не существует!" "$RED"
+    print_message "Partition Error${non_existent_parts} does not exist!" "$RED"
     error_occurred=1
   fi
 
   if [ "$error_occurred" -eq 0 ] && [ $valid_parts -eq 1 ]; then
-    print_message "Успешно сохранено в $folder_path" "$GREEN"
+    print_message "Save successfully $folder_path" "$GREEN"
   else
-    print_message "Ошибка при сохранении." "$RED"
+    print_message "Save error." "$RED"
   fi
   exit_function
 }
@@ -1238,20 +1238,20 @@ backup_block() {
 backup_entware() {
   packages_checker "tar libacl"
   output=$(mount)
-  select_drive "Выберите накопитель:"
+  select_drive "Select Storage Device:"
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
-  spinner_start "Выполняю копирование"
+  spinner_start "Copy in progress"
   tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" --exclude="$backup_file" . 2>&1)
   rc=$?
 
   log_operation=$(echo "$tar_output" | tail -n 2)
   if echo "$log_operation" | grep -iq "error\|no space left on device"; then
     spinner_stop 1
-    print_message "Ошибка при создании бэкапа:" "$RED"
+    print_message "Error creating backup:" "$RED"
     echo "$log_operation"
   else
     spinner_stop 0
-    print_message "Бэкап успешно сохранен в $backup_file" "$GREEN"
+    print_message "Backup successfully saved to $backup_file" "$GREEN"
   fi
   exit_function
 }
@@ -1259,23 +1259,23 @@ backup_entware() {
 rewrite_block() {
   check_host
   output=$(mount)
-  select_drive "Выберите накопитель с размещённым файлом:"
+  select_drive "Select the drive with the file placed:"
   files=$(find_files "$selected_drive" "60k")
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
-    print_message "Файл для замены не найден в выбранном хранилище" "$RED"
+    print_message "Overwrite file not found in the selected repository" "$RED"
     exit_function
   fi
-  echo "Найдены файлы:"
+  echo "Files found:"
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
   exit_main_menu
-  read -p "Выберите файл для замены: " choice
+  read -p "Select a file to replace: " choice
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
   fi
   if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
-    print_message "Неверный выбор файла" "$RED"
+    print_message "Invalid File Selection" "$RED"
     exit_function
   fi
 
@@ -1285,8 +1285,8 @@ rewrite_block() {
   mtd_output=$(cat /proc/mtd)
   echo "$mtd_output" | awk 'NR>1 {print $0}'
   exit_main_menu
-  print_message "Внимание! Загрузчик не перезаписывается!" "$RED"
-  read -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice
+  print_message "Attention! The bootloader is not overwritten!" "$RED"
+  read -p "Specify the number of(а) Section(RH) separated by spaces: " choice
   choice=$(echo "$choice" | tr -d '\n\r')
 
   if [ "$choice" = "00" ]; then
@@ -1299,7 +1299,7 @@ rewrite_block() {
 
   for part in $choice; do
     if [ "$part" = "0" ]; then
-      print_message "Загрузчик не перезаписывается!" "$RED"
+      print_message "The bootloader is not overwritten!" "$RED"
       continue
     fi
 
@@ -1310,7 +1310,7 @@ rewrite_block() {
 
     selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
     echo ""
-    read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$part.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
+    read -r -p "$(printf "Overwrite Section ${CYAN}mtd$part.$selected_mtd${NC} Washim ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
@@ -1318,7 +1318,7 @@ rewrite_block() {
         mountFS
       fi
       perform_dd "$mtdFile" "/dev/mtdblock$part"
-      print_message "Раздел успешно перезаписан" "$GREEN"
+      print_message "Section successfully overwritten" "$GREEN"
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         umountFS
       fi
@@ -1331,12 +1331,12 @@ rewrite_block() {
   done
 
   if [ -n "$non_existent_parts" ]; then
-    print_message "Ошибка: Раздела${non_existent_parts} не существует!" "$RED"
+    print_message "Partition Error${non_existent_parts} does not exist!" "$RED"
     error_occurred=1
   fi
 
   if [ "$error_occurred" -eq 0 ]; then
-    read -r -p "Перезагрузить роутер? (y/n) " item_rc2
+    read -r -p "Restart your router? (y/n) " item_rc2
     item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
     case "$item_rc2" in
     y | Y)
@@ -1360,7 +1360,7 @@ service() {
 
   curl -L -s "$(get_osvault)/scripts/service.py" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ] || ! head -n1 "$SCRIPT_PATH" | grep -q "^#\|^import\|^def\|^class"; then
-    print_message "Ошибка при получении файла, попробуйте позже" "$RED"
+    print_message "Error retrieving file, please try again later" "$RED"
     exit_function
   fi
 
@@ -1370,9 +1370,9 @@ service() {
   if [ -n "$mtdSlot" ]; then
     perform_dd "/dev/mtd$mtdSlot" "$folder_path/U-Config.bin"
     if [ $? -eq 0 ]; then
-      print_message "Бэкап текущего U-Config сохранён в $folder_path" "$GREEN"
+      print_message "Current backup U-Config To $folder_path" "$GREEN"
     else
-      print_message "Ошибка при создании бэкапа U-Config" "$RED"
+      print_message "Error creating backup U-Config" "$RED"
     fi
   fi
 
@@ -1384,28 +1384,28 @@ service() {
 
   mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
   if [ -n "$mtdFile" ]; then
-    print_message "Новые сервисные данные сохранены в $mtdFile" "$GREEN"
+    print_message "New service data saved to $mtdFile" "$GREEN"
   fi
-  read -p "Продолжить замену? (y/n) " item_rc1
+  read -p "Continue replacement? (y/n) " item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
     echo ""
-    printf "${CYAN}Перезаписываю первый раздел...${NC}\n"
+    printf "${CYAN}Overwrite the first section...${NC}\n"
     perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
       echo ""
-      printf "${CYAN}Найден второй раздел, перезаписываю...${NC}\n"
+      printf "${CYAN}The second section was found, I'm overwriting it...${NC}\n"
       perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot_res"
     fi
     if [ $? -eq 0 ]; then
-      print_message "Сервисные данные успешно заменены" "$GREEN"
+      print_message "Service Data Successfully Replaced" "$GREEN"
     else
-      print_message "Ошибка при выполнении замены" "$RED"
+      print_message "Error while performing replacement" "$RED"
     fi
     ;;
   esac
-  read -p "Перезагрузить роутер? (y/n) " item_rc2
+  read -p "Restart your router? (y/n) " item_rc2
   item_rc2=$(echo "$item_rc2" | tr -d ' \n\r')
   case "$item_rc2" in
   y | Y)
