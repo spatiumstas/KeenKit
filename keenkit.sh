@@ -13,11 +13,12 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.5"
+SCRIPT_VERSION="2.5.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
+REMOTE_VERSION=$(curl -s --max-time 2 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
 
 print_menu() {
   printf "\033c"
@@ -32,7 +33,7 @@ print_menu() {
 EOF
   arch="$(get_architecture)"
   printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (слот: "$(get_boot_current)")"
-  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($arch) | $(get_temperature)"
+  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($arch)$(get_temperatures)"
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
     printf "${CYAN}Модем:          ${NC}%s\n" "$get_modem_info"
   fi
@@ -43,7 +44,7 @@ EOF
     printf "${CYAN}Ретрансляторы:  ${NC}"
     printf "%b\n" "$get_repeaters_info"
   fi
-  printf "${CYAN}Версия:         ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
+  printf "${CYAN}Версия:         ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}$(check_update)"
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
   echo "3. Бэкап Entware"
@@ -82,7 +83,7 @@ main_menu() {
     00) exit ;;
     77) changeLanguage ;;
     88) packages_delete ;;
-    99) script_update;;
+    99) script_update ;;
     *)
       echo "Неверный выбор. Попробуйте снова."
       sleep 1
@@ -125,16 +126,40 @@ rci_request() {
   curl -s "http://localhost:79/rci/$endpoint"
 }
 
+rci_show_version() {
+  local now
+  now=$(date +%s)
+  case "$RCI_VERSION_CACHE_TS" in
+  '' | *[!0-9]*)
+    ;;
+  *)
+    if [ -n "$RCI_VERSION_CACHE" ] && [ $((now - RCI_VERSION_CACHE_TS)) -lt 5 ]; then
+      echo "$RCI_VERSION_CACHE"
+      return
+    fi
+    ;;
+  esac
+
+  RCI_VERSION_CACHE=$(rci_request "show/version")
+  RCI_VERSION_CACHE_TS="$now"
+  echo "$RCI_VERSION_CACHE"
+}
+
+check_update() {
+  [ -z "$REMOTE_VERSION" ] && return
+  [ "$REMOTE_VERSION" != "$SCRIPT_VERSION" ] && printf " | ${GREEN}Доступно $REMOTE_VERSION${NC}"
+}
+
 get_device() {
-  rci_request "show/version" | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  rci_show_version | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_fw_version() {
-  rci_request "show/version" | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  rci_show_version | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_hw_id() {
-  rci_request "show/version" | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  rci_show_version | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 format_uptime_seconds() {
@@ -425,32 +450,39 @@ get_radio_temp() {
   rci_request "show/interface/$1" | grep -o '"temperature": *[0-9]*' | grep -o '[0-9]*' | head -n1
 }
 
-get_temperature() {
+get_temperatures() {
   temp_2=$(get_radio_temp WifiMaster0)
   temp_5=$(get_radio_temp WifiMaster1)
   arch=$(get_architecture)
-  temp_cpu=""
   cpu_str=""
+  wifi_str=""
 
   if [ "$arch" = "aarch64" ]; then
     temp_cpu_raw=$(cat /sys/devices/virtual/thermal/thermal_zone0/temp | tr -d -c '0-9')
     if [ -n "$temp_cpu_raw" ]; then
-      temp_cpu=$((temp_cpu_raw / 1000))
-      cpu_str=" | CPU: ${temp_cpu}°C"
+      cpu_str="CPU: $((temp_cpu_raw / 1000))°C"
     fi
   fi
 
-  if echo "$temp_2" | grep -qE '^[0-9]+$' && echo "$temp_5" | grep -qE '^[0-9]+$'; then
+  if ! echo "$temp_2" | grep -qE '^[0-9]+$'; then
+    [ -n "$cpu_str" ] && echo " | $cpu_str"
+    return
+  fi
+
+  if echo "$temp_5" | grep -qE '^[0-9]+$'; then
     diff=$((temp_5 - temp_2))
     [ $diff -lt 0 ] && diff=$((-diff))
     if [ $diff -lt 3 ]; then
-      echo "Wi-Fi: ${temp_5}°C${cpu_str}"
-      return
+      wifi_str="Wi-Fi: ${temp_5}°C"
+    else
+      wifi_str="2.4GHz: ${temp_2}°C | 5GHz: ${temp_5}°C"
     fi
-    echo "2.4GHz: ${temp_2}°C | 5GHz: ${temp_5}°C${cpu_str}"
   else
-    echo "2.4GHz: ${temp_2}°C${cpu_str}"
+    wifi_str="2.4GHz: ${temp_2}°C"
   fi
+
+  [ -n "$cpu_str" ] && wifi_str="$wifi_str | $cpu_str"
+  echo " | $wifi_str"
 }
 
 get_cpu_model() {
@@ -545,9 +577,11 @@ packages_checker() {
   local packages="$1"
   local flag="$2"
   local missing=""
+  local installed
+  installed=$(opkg list-installed 2>/dev/null)
 
   for pkg in $packages; do
-    if ! opkg list-installed | grep -q "^$pkg"; then
+    if ! echo "$installed" | grep -q "^$pkg "; then
       missing="$missing $pkg"
     fi
   done
@@ -729,13 +763,15 @@ EOF
 }
 
 has_an_external_storage() {
-  for line in $(mount | grep "/dev/sd"); do
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
     if echo "$line" | grep -q "$OPT_DIR"; then
-      echo ""
-    else
-      return 0
+      continue
     fi
-  done
+    return 0
+  done <<EOF
+$(mount | grep "/dev/sd")
+EOF
   return 1
 }
 
@@ -786,21 +822,21 @@ exit_main_menu() {
 
 script_update() {
   packages_checker "curl jq"
-  curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
+  response=$(curl -fLsS "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output "$TMP_DIR/$SCRIPT" 2>&1)
+  if [ $? -ne 0 ]; then
+    response=$(printf "%s\n" "$response" | head -n1)
+    print_message "Ошибка $response при обновлении скрипта" "$RED"
+    exit_function
+  fi
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
-    chmod +x $OPT_DIR/$SCRIPT
-    if [ ! -f "$OPT_DIR/bin/keenkit" ]; then
-      cd $OPT_DIR/bin
-      ln -s "$OPT_DIR/$SCRIPT" "$OPT_DIR/bin/keenkit"
-    fi
+    chmod +x "$OPT_DIR/$SCRIPT"
     print_message "Скрипт успешно обновлён" "$GREEN"
     sleep 1
-    $OPT_DIR/$SCRIPT
+    "$OPT_DIR/$SCRIPT"
   else
-    response=$(curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" | head -n1)
-    print_message "Ошибка $response при обновлении скрипта" "$RED"
+    print_message "Скрипт не был загружен" "$RED"
     exit_function
   fi
 }
@@ -841,13 +877,11 @@ ota_update() {
   check_host
   packages_checker "curl findutils jq"
   osvault="$(get_osvault)/osvault"
-  REQUEST=$(curl -L -s "$osvault")
-  DIRS=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
+  REQUEST=$(curl -fLsS "$osvault")
+  DIRS=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
 
   if [ -z "$DIRS" ]; then
-    status_line=$(wget -S --spider -O /dev/null "$osvault" 2>&1 | grep 'HTTP/' | tail -n1)
-    http_text=$(echo "$status_line" | cut -d' ' -f3-)
-    print_message "Ошибка $http_text при получении данных, попробуйте позже" "$RED"
+    print_message "Ошибка при получении данных, попробуйте позже" "$RED"
     exit_function
   fi
 
@@ -871,8 +905,8 @@ ota_update() {
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
   DIR_ENCODED=$(echo "$DIR" | sed 's/ /%20/g')
 
-  REQUEST=$(curl -L -s "$osvault/$DIR_ENCODED/")
-  BIN_FILES=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep '\.bin$' | sed 's|%20| |g')
+  REQUEST=$(curl -fLsS "$osvault/$DIR_ENCODED/" 2>/dev/null)
+  BIN_FILES=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep '\.bin$' | sed 's|%20| |g')
 
   if [ -z "$BIN_FILES" ]; then
     printf "${RED}В директории $DIR нет файлов.${NC}\n"
@@ -909,7 +943,7 @@ ota_update() {
       print_message "Файл не выбран" "$RED"
       exit_function
     fi
-    total_size=$(curl -sIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
+    total_size=$(curl -fsSIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     ram_size=$(get_ram_size)
     total_size_mb=$((total_size / 1024 / 1024))
     free_space_mb=$(get_internal_storage_size free)
@@ -924,14 +958,14 @@ ota_update() {
     echo ""
     show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" "$FILE" &
     progress_pid=$!
-    curl -L --silent "$osvault/$DIR_ENCODED/$FILE_ENCODED" --output "$DOWNLOAD_PATH/$FILE"
+    curl -fLsS "$osvault/$DIR_ENCODED/$FILE_ENCODED" --output "$DOWNLOAD_PATH/$FILE"
     wait $progress_pid
     if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
       printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
       exit_function
     fi
 
-    curl -L -s "$osvault/$DIR_ENCODED/md5sum" --output "$DOWNLOAD_PATH/md5sum"
+    curl -fLsS "$osvault/$DIR_ENCODED/md5sum" --output "$DOWNLOAD_PATH/md5sum"
     MD5SUM_REMOTE=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     MD5SUM_LOCAL=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
@@ -966,7 +1000,7 @@ ota_update() {
   fi
 }
 
-update_firmware_block_legacy() {
+update_firmware_legacy() {
   local firmware="$1"
   local use_mount="$2"
   backup_config
@@ -978,11 +1012,11 @@ update_firmware_block_legacy() {
     if [ "$partition" = "Firmware_2" ] && (get_ndm_storage || [ "$(get_boot_current)" = "1" ]); then
       continue
     fi
-    mtdSlot="$(grep -w '/proc/mtd' -e "$partition")"
+    mtdSlot="$(grep -w "$partition" /proc/mtd)"
     if [ -z "$mtdSlot" ]; then
       sleep 1
     else
-      result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+      result=$(echo "$mtdSlot" | sed -n 's/^mtd\([0-9][0-9]*\):.*/\1/p')
       echo "Обновляю $partition..."
       perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
@@ -994,7 +1028,7 @@ update_firmware_block_legacy() {
   fi
 }
 
-update_firmware_block_dual() {
+update_firmware_dual() {
   local firmware="$1"
   local use_mount="$2"
   local current_slot new_slot
@@ -1005,7 +1039,7 @@ update_firmware_block_dual() {
   current_slot="$(get_boot_current)"
   if ! echo "$current_slot" | grep -qE '^[12]$'; then
     print_message "Не удалось определить текущий слот: $current_slot. Использую стандартный режим обновления." "$RED"
-    update_firmware_block_legacy "$firmware" "$use_mount"
+    update_firmware_legacy "$firmware" "$use_mount"
     return
   fi
 
@@ -1014,7 +1048,7 @@ update_firmware_block_dual() {
 
   if [ -z "$fw_slot1" ] || [ -z "$fw_slot2" ]; then
     print_message "Не найдены разделы Firmware_1/Firmware_2. Использую стандартный режим обновления." "$RED"
-    update_firmware_block_legacy "$firmware" "$use_mount"
+    update_firmware_legacy "$firmware" "$use_mount"
     return
   fi
 
@@ -1044,6 +1078,10 @@ update_firmware_block_dual() {
   fi
 }
 
+legacy_bootloader() {
+  hexdump -C /dev/mtd0 2>/dev/null | head -n 10 | grep -q "Breed"
+}
+
 update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
@@ -1064,16 +1102,18 @@ update_firmware_block() {
     fi
   fi
 
-  if [ "$arch" = "aarch64" ] && get_host; then
-    update_firmware_block_legacy "$firmware" "$use_mount"
-  else
-  read -p "Использовать dual-boot режим обновления? (Для уверенных пользователей) (y/n) " rc1
-  rc1=$(echo "$rc1" | tr -d ' \n\r')
-  case "$rc1" in
-  y | Y) update_firmware_block_dual "$firmware" "$use_mount" ;;
-  *) update_firmware_block_legacy "$firmware" "$use_mount" ;;
-  esac
+  updater="update_firmware_legacy"
+  if ! ([ "$arch" = "aarch64" ] && get_host); then
+    if ! legacy_bootloader; then
+      read -p "Использовать dual-boot режим обновления? (Для уверенных пользователей) (y/n) " rc1
+      rc1=$(echo "$rc1" | tr -d ' \n\r')
+      case "$rc1" in
+      y | Y) updater="update_firmware_dual" ;;
+      *) ;;
+      esac
+    fi
   fi
+  $updater "$firmware" "$use_mount"
 }
 
 find_files() {
@@ -1081,17 +1121,21 @@ find_files() {
   local min_size="$2"
   local exclude_pattern="$3"
 
-  local find_cmd="find \"$search_path\" -name '*.bin' -size +${min_size}"
-
   if [ "$search_path" = "$TMP_DIR" ]; then
-    find_cmd="$find_cmd -not -path \"*/mnt/*\""
+    if [ -n "$exclude_pattern" ]; then
+      find "$search_path" -name '*.bin' -size +"$min_size" -not -path '*/mnt/*' -not -path "$exclude_pattern"
+      return
+    fi
+    find "$search_path" -name '*.bin' -size +"$min_size" -not -path '*/mnt/*'
+    return
   fi
 
   if [ -n "$exclude_pattern" ]; then
-    find_cmd="$find_cmd -not -path \"$exclude_pattern\""
+    find "$search_path" -name '*.bin' -size +"$min_size" -not -path "$exclude_pattern"
+    return
   fi
 
-  eval "$find_cmd"
+  find "$search_path" -name '*.bin' -size +"$min_size"
 }
 
 firmware_manual_update() {
@@ -1183,7 +1227,7 @@ backup_block() {
   if [ "$choice" = "99" ]; then
     output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
     for i in $(seq 0 $(($output_all_mtd - 1))); do
-      mtd_name=$(echo "$mtd_output" | awk -v i=$i 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+      mtd_name=$(echo "$mtd_output" | awk -v i=$i 'NR==i+2 {gsub(/"/, "", $4); print $4}')
       if [ $valid_parts -eq 0 ]; then
         mkdir -p "$folder_path"
         valid_parts=1
@@ -1205,7 +1249,7 @@ backup_block() {
         continue
       fi
 
-      selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+      selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {gsub(/"/, "", $4); print $4}')
 
       if [ $valid_parts -eq 0 ]; then
         mkdir -p "$folder_path"
@@ -1308,7 +1352,7 @@ rewrite_block() {
       continue
     fi
 
-    selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print substr($0, index($0,$4))}' | grep -oP '(?<=\").*(?=\")')
+    selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {gsub(/"/, "", $4); print $4}')
     echo ""
     read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$part.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -1358,7 +1402,7 @@ service() {
   target_flag=$1
   packages_checker "curl python3-base python3 python3-light libpython3 findutils" "--nodeps"
 
-  curl -L -s "$(get_osvault)/scripts/service.py" --output "$SCRIPT_PATH"
+  curl -fLsS "$(get_osvault)/scripts/service.py" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ] || ! head -n1 "$SCRIPT_PATH" | grep -q "^#\|^import\|^def\|^class"; then
     print_message "Ошибка при получении файла, попробуйте позже" "$RED"
     exit_function
@@ -1427,10 +1471,17 @@ changeLanguage() {
     BRANCH_NEW="main"
   fi
   print_message "Switching..." "$CYAN"
-  curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/${BRANCH_NEW}/install.sh" > /tmp/install.sh && sh /tmp/install.sh
+  if curl -fL -s "https://raw.githubusercontent.com/$USERNAME/$REPO/${BRANCH_NEW}/install.sh" --output /tmp/install.sh &&
+    [ -s /tmp/install.sh ]; then
+    sh /tmp/install.sh
+  else
+    print_message "Error switching" "$RED"
+    exit_function
+  fi
 }
 
 cleanup() {
+  rc=$?
   if [ -n "$SPINNER_PID" ]; then
     kill "$SPINNER_PID" 2>/dev/null
     wait "$SPINNER_PID" 2>/dev/null
@@ -1438,7 +1489,7 @@ cleanup() {
     unset SPINNER_PID
   fi
   pkill -P $$ 2>/dev/null
-  exit 0
+  exit "$rc"
 }
 
 if [ "$1" = "script_update" ]; then
