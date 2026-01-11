@@ -13,6 +13,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main-english
+          fetch-depth: 0
+
+      - name: Sync files from main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout origin/main -- keenkit.sh install.sh README.md
 
       - name: Set up Python
         uses: actions/setup-python@v4
