@@ -32,7 +32,7 @@ print_menu() {
 EOF
   arch="$(get_architecture)"
   printf "${CYAN}Model:     ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (slot: "$(get_boot_current)")"
-  printf "${CYAN}CPU:       ${NC}%s\n" "$(get_cpu_model) ($arch) | $(get_temperature)"
+  printf "${CYAN}CPU:       ${NC}%s\n" "$(get_cpu_model) ($arch)$(get_temperatures)"
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
     printf "${CYAN}Modem:     ${NC}%s\n" "$get_modem_info"
   fi
@@ -786,21 +786,21 @@ exit_main_menu() {
 
 script_update() {
   packages_checker "curl jq"
-  curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
+  response=$(curl -fLsS "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output "$TMP_DIR/$SCRIPT" 2>&1)
+  if [ $? -ne 0 ]; then
+    response=$(printf "%s\n" "$response" | head -n1)
+    print_message "Error $response when updating the script" "$RED"
+    exit_function
+  fi
 
   if [ -f "$TMP_DIR/$SCRIPT" ]; then
     mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
-    chmod +x $OPT_DIR/$SCRIPT
-    if [ ! -f "$OPT_DIR/bin/keenkit" ]; then
-      cd $OPT_DIR/bin
-      ln -s "$OPT_DIR/$SCRIPT" "$OPT_DIR/bin/keenkit"
-    fi
+    chmod +x "$OPT_DIR/$SCRIPT"
     print_message "Script updated successfully" "$GREEN"
     sleep 1
     $OPT_DIR/$SCRIPT
   else
-    response=$(curl -L -s "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" | head -n1)
-    print_message "Error $response when updating the script" "$RED"
+    print_message "Script was not loaded" "$RED"
     exit_function
   fi
 }
@@ -845,9 +845,7 @@ ota_update() {
   DIRS=$(echo "$REQUEST" | grep -oP 'href="\K[^"]+' | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
 
   if [ -z "$DIRS" ]; then
-    status_line=$(wget -S --spider -O /dev/null "$osvault" 2>&1 | grep 'HTTP/' | tail -n1)
-    http_text=$(echo "$status_line" | cut -d' ' -f3-)
-    print_message "Error $http_text when receiving data, try again later" "$RED"
+    print_message "Error retrieving data, please try again later" "$RED"
     exit_function
   fi
 
@@ -982,7 +980,7 @@ update_firmware_block_legacy() {
     if [ -z "$mtdSlot" ]; then
       sleep 1
     else
-      result=$(echo "$mtdSlot" | grep -oP '.*(?=:)' | grep -oE '[0-9]+')
+      result=$(echo "$mtdSlot" | sed -n 's/^mtd\([0-9][0-9]*\):.*/\1/p')
       echo "Updating $partition..."
       perform_dd "$firmware" "/dev/mtdblock$result"
       echo ""
