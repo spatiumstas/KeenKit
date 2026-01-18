@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.5.1"
+SCRIPT_VERSION="2.5.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -994,7 +994,7 @@ ota_update() {
   fi
 }
 
-update_firmware_block_legacy() {
+update_firmware_legacy() {
   local firmware="$1"
   local use_mount="$2"
   backup_config
@@ -1022,7 +1022,7 @@ update_firmware_block_legacy() {
   fi
 }
 
-update_firmware_block_dual() {
+update_firmware_dual() {
   local firmware="$1"
   local use_mount="$2"
   local current_slot new_slot
@@ -1033,7 +1033,7 @@ update_firmware_block_dual() {
   current_slot="$(get_boot_current)"
   if ! echo "$current_slot" | grep -qE '^[12]$'; then
     print_message "Failed to determine current slot: $current_slot. I use the standard update mode." "$RED"
-    update_firmware_block_legacy "$firmware" "$use_mount"
+    update_firmware_legacy "$firmware" "$use_mount"
     return
   fi
 
@@ -1042,7 +1042,7 @@ update_firmware_block_dual() {
 
   if [ -z "$fw_slot1" ] || [ -z "$fw_slot2" ]; then
     print_message "No Sections found Firmware_1/Firmware_2. I use the standard update mode." "$RED"
-    update_firmware_block_legacy "$firmware" "$use_mount"
+    update_firmware_legacy "$firmware" "$use_mount"
     return
   fi
 
@@ -1072,6 +1072,10 @@ update_firmware_block_dual() {
   fi
 }
 
+legacy_bootloader() {
+  hexdump -C /dev/mtd0 2>/dev/null | head -n 10 | grep -q "Breed"
+}
+
 update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
@@ -1092,16 +1096,18 @@ update_firmware_block() {
     fi
   fi
 
-  if [ "$arch" = "aarch64" ] && get_host; then
-    update_firmware_block_legacy "$firmware" "$use_mount"
-  else
-  read -p "To Use dual-boot Update mode? (For confident users) (y/n) " rc1
-  rc1=$(echo "$rc1" | tr -d ' \n\r')
-  case "$rc1" in
-  y | Y) update_firmware_block_dual "$firmware" "$use_mount" ;;
-  *) update_firmware_block_legacy "$firmware" "$use_mount" ;;
-  esac
+  updater="update_firmware_legacy"
+  if ! ([ "$arch" = "aarch64" ] && get_host); then
+    if ! legacy_bootloader; then
+      read -p "To Use dual-boot Update mode? (For confident users) (y/n) " rc1
+      rc1=$(echo "$rc1" | tr -d ' \n\r')
+      case "$rc1" in
+      y | Y) updater="update_firmware_dual" ;;
+      *) ;;
+      esac
+    fi
   fi
+  $updater "$firmware" "$use_mount"
 }
 
 find_files() {
