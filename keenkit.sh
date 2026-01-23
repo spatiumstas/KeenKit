@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.5.2"
+SCRIPT_VERSION="2.5.3"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -365,6 +365,7 @@ copy_dual_config() {
 set_boot_slot() {
   local new_slot="$1"
   local current_slot="$2"
+  local update_mode="$3"
 
   if [ -z "$new_slot" ] || [ -z "$current_slot" ]; then
     print_message "Неизвестные значения слотов (current: $current_slot, new: $new_slot)" "$RED"
@@ -376,7 +377,11 @@ set_boot_slot() {
     return 1
   fi
 
-  echo "$new_slot" >/proc/dual_image/boot_active || return 1
+  if [ -n "$update_mode" ]; then
+    echo 0 >/proc/dual_image/boot_active || return 1
+  else
+    echo "$new_slot" >/proc/dual_image/boot_active || return 1
+  fi
   echo "$current_slot" >/proc/dual_image/boot_backup || true
   echo 0 >/proc/dual_image/boot_fails || true
   echo 0 >/proc/dual_image/commit || true
@@ -1072,8 +1077,8 @@ update_firmware_dual() {
   fi
 
   print_message "Переключаюсь на $new_slot слот" "$CYAN"
-  if ! set_boot_slot "$new_slot" "$current_slot"; then
-    print_message "Не удалось переключить слот на $new_slot." "$RED"
+  if ! set_boot_slot "$new_slot" "$current_slot" "update_mode"; then
+    print_message "Ошибка при переключении слота на $new_slot." "$RED"
     return 1
   fi
 }
@@ -1105,7 +1110,7 @@ update_firmware_block() {
   updater="update_firmware_legacy"
   if ! ([ "$arch" = "aarch64" ] && get_host); then
     if ! legacy_bootloader; then
-      read -p "Использовать dual-boot режим обновления? (Для уверенных пользователей) (y/n) " rc1
+      read -p "Использовать dual-image режим обновления? (Для уверенных пользователей) (y/n) " rc1
       rc1=$(echo "$rc1" | tr -d ' \n\r')
       case "$rc1" in
       y | Y) updater="update_firmware_dual" ;;
