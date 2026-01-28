@@ -13,21 +13,22 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.5.2"
+SCRIPT_VERSION="2.5.3"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
+REMOTE_VERSION=$(curl -s --max-time 2 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
 
 print_menu() {
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
-  _  __               _  ___ _
- | |/ /___  ___ _ __ | |/ (_) |_
- | ' // _ \/ _ \ '_ \| ' /| | __|
- | . \  __/  __/ | | | . \| | |_
- |_|\_\___|\___|_| |_|_|\_\_|\__|
+    __ __                __ __ _ __
+   / //_/__  ___  ____  / //_/(_) /_
+  / ,< / _ \/ _ \/ __ \/ ,<  / / __/
+ / /| /  __/  __/ / / / /| |/ / /_
+/_/ |_\___/\___/_/ /_/_/ |_/_/\__/
 
 EOF
   arch="$(get_architecture)"
@@ -43,7 +44,7 @@ EOF
     printf "${CYAN}Repeaters: ${NC}"
     printf "%b\n" "$get_repeaters_info"
   fi
-  printf "${CYAN}Version:   ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}"
+  printf "${CYAN}Version:   ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}$(check_update)"
   echo "1. Update Firmware from File"
   echo "2. Backup sections"
   echo "3. Backup  Entware"
@@ -142,6 +143,11 @@ rci_show_version() {
   RCI_VERSION_CACHE=$(rci_request "show/version")
   RCI_VERSION_CACHE_TS="$now"
   echo "$RCI_VERSION_CACHE"
+}
+
+check_update() {
+  [ -z "$REMOTE_VERSION" ] && return
+  [ "$REMOTE_VERSION" != "$SCRIPT_VERSION" ] && printf " | ${GREEN}Available $REMOTE_VERSION${NC}"
 }
 
 get_device() {
@@ -359,6 +365,7 @@ copy_dual_config() {
 set_boot_slot() {
   local new_slot="$1"
   local current_slot="$2"
+  local update_mode="$3"
 
   if [ -z "$new_slot" ] || [ -z "$current_slot" ]; then
     print_message "Unknown slot values (current: $current_slot, new: $new_slot)" "$RED"
@@ -370,7 +377,11 @@ set_boot_slot() {
     return 1
   fi
 
-  echo "$new_slot" >/proc/dual_image/boot_active || return 1
+  if [ -n "$update_mode" ]; then
+    echo 0 >/proc/dual_image/boot_active || return 1
+  else
+    echo "$new_slot" >/proc/dual_image/boot_active || return 1
+  fi
   echo "$current_slot" >/proc/dual_image/boot_backup || true
   echo 0 >/proc/dual_image/boot_fails || true
   echo 0 >/proc/dual_image/commit || true
@@ -1066,8 +1077,8 @@ update_firmware_dual() {
   fi
 
   print_message "Switching to $new_slot slot" "$CYAN"
-  if ! set_boot_slot "$new_slot" "$current_slot"; then
-    print_message "Failed to switch slot to $new_slot." "$RED"
+  if ! set_boot_slot "$new_slot" "$current_slot" "update_mode"; then
+    print_message "Error switching slot to $new_slot." "$RED"
     return 1
   fi
 }
@@ -1099,7 +1110,7 @@ update_firmware_block() {
   updater="update_firmware_legacy"
   if ! ([ "$arch" = "aarch64" ] && get_host); then
     if ! legacy_bootloader; then
-      read -p "To Use dual-boot Update mode? (For confident users) (y/n) " rc1
+      read -p "To Use dual-image Update mode? (For confident users) (y/n) " rc1
       rc1=$(echo "$rc1" | tr -d ' \n\r')
       case "$rc1" in
       y | Y) updater="update_firmware_dual" ;;
@@ -1279,7 +1290,7 @@ backup_entware() {
   select_drive "Select Storage Device:"
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
   spinner_start "Copy in progress"
-  tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" --exclude="$backup_file" . 2>&1)
+  tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" --exclude="$(basename "$backup_file")" . 2>&1)
   rc=$?
 
   log_operation=$(echo "$tar_output" | tail -n 2)
