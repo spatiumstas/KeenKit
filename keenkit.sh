@@ -1,5 +1,5 @@
 #!/bin/sh
-trap cleanup INT TERM EXIT
+trap cleanup HUP INT TERM EXIT
 export LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
 RED='\033[1;31m'
 GREEN='\033[1;32m'
@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.5.3"
+SCRIPT_VERSION="2.5.5"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -64,14 +64,19 @@ EOF
 }
 
 main_menu() {
-  print_menu
-  read -p "Выберите действие: " choice
-  echo ""
-  choice=$(echo "$choice" | tr -d '\032' | tr -d '[A-Z]')
+  while true; do
+    print_menu
+    if ! read -r -p "Выберите действие: " choice; then
+      echo ""
+      exit 0
+    fi
+    echo ""
+    choice=$(echo "$choice" | tr -d '\032' | tr -d '[A-Z]')
 
-  if [ -z "$choice" ]; then
-    main_menu
-  else
+    if [ -z "$choice" ]; then
+      continue
+    fi
+
     case "$choice" in
     1) firmware_manual_update ;;
     2) backup_block ;;
@@ -80,17 +85,16 @@ main_menu() {
     5) ota_update ;;
     6) service ;;
     7) switch_boot_slot ;;
-    00) exit ;;
+    00) exit 0 ;;
     77) changeLanguage ;;
     88) packages_delete ;;
     99) script_update ;;
     *)
       echo "Неверный выбор. Попробуйте снова."
       sleep 1
-      main_menu
       ;;
     esac
-  fi
+  done
 }
 
 print_message() {
@@ -126,23 +130,11 @@ rci_request() {
   curl -s "http://localhost:79/rci/$endpoint"
 }
 
-rci_show_version() {
-  local now
-  now=$(date +%s)
-  case "$RCI_VERSION_CACHE_TS" in
-  '' | *[!0-9]*)
-    ;;
-  *)
-    if [ -n "$RCI_VERSION_CACHE" ] && [ $((now - RCI_VERSION_CACHE_TS)) -lt 5 ]; then
-      echo "$RCI_VERSION_CACHE"
-      return
-    fi
-    ;;
-  esac
-
-  RCI_VERSION_CACHE=$(rci_request "show/version")
-  RCI_VERSION_CACHE_TS="$now"
-  echo "$RCI_VERSION_CACHE"
+rci_parse() {
+  local command="$1"
+  curl -fsS -H "Content-Type: application/json" \
+    -d "[{\"parse\":\"$command\"}]" \
+    "http://localhost:79/rci/"
 }
 
 check_update() {
@@ -151,15 +143,15 @@ check_update() {
 }
 
 get_device() {
-  rci_show_version | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  rci_request "show/version" | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_fw_version() {
-  rci_show_version | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  rci_request "show/version" | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_hw_id() {
-  rci_show_version | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  rci_request "show/version" | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 format_uptime_seconds() {
@@ -363,28 +355,9 @@ copy_dual_config() {
 }
 
 set_boot_slot() {
-  local new_slot="$1"
-  local current_slot="$2"
-  local update_mode="$3"
-
-  if [ -z "$new_slot" ] || [ -z "$current_slot" ]; then
-    print_message "Неизвестные значения слотов (current: $current_slot, new: $new_slot)" "$RED"
-    return 1
-  fi
-
-  if ! echo "$new_slot" | grep -qE '^[0-9]+$'; then
-    print_message "Некорректный новый слот: $new_slot" "$RED"
-    return 1
-  fi
-
-  if [ -n "$update_mode" ]; then
-    echo 0 >/proc/dual_image/boot_active || return 1
-  else
-    echo "$new_slot" >/proc/dual_image/boot_active || return 1
-  fi
-  echo "$current_slot" >/proc/dual_image/boot_backup || true
-  echo 0 >/proc/dual_image/boot_fails || true
-  echo 0 >/proc/dual_image/commit || true
+  rci_parse "copy proc:/dual_image/boot_active proc:/dual_image/boot_backup" >/dev/null 2>&1 || return 1
+  rci_parse "copy proc:/dual_image/boot_fails proc:/dual_image/boot_active" >/dev/null 2>&1 || return 1
+  rci_parse "copy proc:/dual_image/boot_fails proc:/dual_image/commit" >/dev/null 2>&1 || return 1
 
   return 0
 }
@@ -418,7 +391,7 @@ switch_boot_slot() {
     exit_function
   fi
 
-  if set_boot_slot "$new_slot" "$current_slot"; then
+  if set_boot_slot; then
     print_message "Слот успешно переключен на $new_slot. Для применения требуется перезагрузка." "$GREEN"
     read -p "Перезагрузить роутер? (y/n) " reboot_ans
     reboot_ans=$(echo "$reboot_ans" | tr -d ' \n\r')
@@ -491,7 +464,7 @@ get_temperatures() {
 }
 
 get_cpu_model() {
-  cpu_list="EN75[0-9A-Za-z]* MT76[0-9A-Za-z]* MT79[0-9A-Za-z]*"
+  cpu_list="MT76[0-9A-Za-z]* MT79[0-9A-Za-z]* EN75[0-9A-Za-z]*"
   for pattern in $cpu_list; do
     found=$(strings /lib/libndmMwsController.so 2>/dev/null | grep -oE "$pattern" | head -n 1)
     if [ -n "$found" ]; then
@@ -632,10 +605,12 @@ perform_dd() {
   local output_file="$2"
 
   checking_mtd_size "$input_file" "$output_file" || return 1
+  sync
+  echo 3 >/proc/sys/vm/drop_caches || true
   output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
 
   if echo "$output" | grep -iq "error\|can't"; then
-    print_message "Ошибка при перезаписи раздела" "$RED"
+    print_message "Ошибка при перезаписи раздела. Воспользуйтесь загрузчиком" "$RED"
     umountFS
     exit_function
   fi
@@ -673,14 +648,66 @@ checking_mtd_size() {
   return 0
 }
 
+select_drive_extract_value() {
+  echo "$1" | cut -d ':' -f2- | sed 's/^[[:space:]]*//; s/[",]//g'
+}
+
+select_drive_reset_partition() {
+  in_partition=0
+  uuid=""
+  label=""
+  fstype=""
+  total_bytes=""
+  free_bytes=""
+}
+
+select_drive_reset_media() {
+  media_found=1
+  media_is_usb=0
+  current_manufacturer=""
+  select_drive_reset_partition
+}
+
+select_drive_add_partition() {
+  local used_bytes display_name fstype_upper
+
+  if [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ]; then
+    select_drive_reset_partition
+    return
+  fi
+
+  echo "$total_bytes" | grep -qE '^[0-9]+$' || total_bytes=0
+  echo "$free_bytes" | grep -qE '^[0-9]+$' || free_bytes=0
+
+  used_bytes=$((total_bytes - free_bytes))
+  [ "$used_bytes" -lt 0 ] && used_bytes=0
+
+  if [ -n "$label" ]; then
+    display_name="$label"
+  elif [ -n "$current_manufacturer" ]; then
+    display_name="$current_manufacturer"
+  else
+    display_name="Unknown"
+  fi
+
+  fstype_upper=$(echo "$fstype" | tr '[:lower:]' '[:upper:]')
+  echo "$index. $display_name ($fstype_upper, $(format_size $used_bytes $total_bytes))"
+  uuids="$uuids $uuid"
+  index=$((index + 1))
+  select_drive_reset_partition
+}
+
 select_drive() {
   local message="$1"
-  labels=""
+  local value
+
   uuids=""
   index=2
   media_found=0
-  media_output=$(ndmc -c show media)
+  media_is_usb=0
+  media_output=$(rci_parse "show media")
   current_manufacturer=""
+  select_drive_reset_partition
 
   if [ -z "$media_output" ]; then
     print_message "Не удалось получить список накопителей" "$RED"
@@ -691,49 +718,41 @@ select_drive() {
   echo "1. Встроенное хранилище ($(get_internal_storage_size))"
 
   while IFS= read -r line; do
+    value=$(select_drive_extract_value "$line")
     case "$line" in
-    *"name: Media"*)
-      media_found=1
-      current_manufacturer=""
+    *"\"Media"*"\":"* | *"name: Media"*)
+      select_drive_reset_media
       ;;
-    *"manufacturer:"*)
-      if [ "$media_found" = "1" ]; then
-        current_manufacturer=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
+    *"\"bus\":"* | *"bus:"*)
+      if [ "$media_found" = "1" ] && [ "$value" = "usb" ]; then
+        media_is_usb=1
       fi
       ;;
-    *"uuid:"*)
+    *"\"manufacturer\":"* | *"manufacturer:"*)
       if [ "$media_found" = "1" ]; then
-        uuid=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
-        read -r label_line
-        read -r fstype_line
-        read -r state_line
-        read -r total_line
-        read -r free_line
-
-        label=$(echo "$label_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        fstype=$(echo "$fstype_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        total_bytes=$(echo "$total_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        free_bytes=$(echo "$free_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        used_bytes=$((total_bytes - free_bytes))
-
-        if [ "$fstype" = "swap" ]; then
-          uuid=""
-          continue
-        fi
-
-        if [ -n "$label" ]; then
-          display_name="$label"
-        elif [ -n "$current_manufacturer" ]; then
-          display_name="$current_manufacturer"
-        else
-          display_name="Unknown"
-        fi
-
-        echo "$index. $display_name ($(echo "$fstype" | tr '[:lower:]' '[:upper:]'), $(format_size $used_bytes $total_bytes))"
-        labels="$labels \"$display_name\""
-        uuids="$uuids $uuid"
-        index=$((index + 1))
-        uuid=""
+        current_manufacturer="$value"
+      fi
+      ;;
+    *"\"uuid\":"* | *"uuid:"*)
+      if [ "$media_found" = "1" ] && [ "$media_is_usb" = "1" ]; then
+        select_drive_reset_partition
+        in_partition=1
+        uuid="$value"
+      fi
+      ;;
+    *"\"label\":"* | *"label:"*)
+      [ "$in_partition" = "1" ] && label="$value"
+      ;;
+    *"\"fstype\":"* | *"fstype:"*)
+      [ "$in_partition" = "1" ] && fstype="$value"
+      ;;
+    *"\"total\":"* | *"total:"*)
+      [ "$in_partition" = "1" ] && total_bytes="$value"
+      ;;
+    *"\"free\":"* | *"free:"*)
+      if [ "$in_partition" = "1" ]; then
+        free_bytes="$value"
+        select_drive_add_partition
       fi
       ;;
     esac
@@ -742,7 +761,10 @@ $media_output
 EOF
 
   exit_main_menu
-  read -p "$message " choice
+  if ! read -r -p "$message " choice; then
+    echo ""
+    exit 0
+  fi
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
@@ -796,7 +818,7 @@ backup_config() {
         local folder_path="$device_uuid:/backup$DATE"
         local backup_file="$folder_path/$(get_hw_id)_$(get_fw_version)_startup-config.txt"
         mkdir -p "$selected_drive/backup$DATE"
-        ndmc -c "copy startup-config $backup_file"
+        rci_parse "copy startup-config $backup_file" >/dev/null 2>&1
 
         if [ $? -eq 0 ]; then
           print_message "Startup-config сохранен в $backup_file" "$GREEN"
@@ -816,7 +838,13 @@ backup_config() {
 
 exit_function() {
   echo ""
-  read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."
+  if [ ! -t 0 ]; then
+    exit 0
+  fi
+  if ! read -n 1 -s -r -p "Для возврата нажмите любую клавишу..."; then
+    echo ""
+    exit 0
+  fi
   pkill -P $$ 2>/dev/null
   exec "$OPT_DIR/$SCRIPT"
 }
@@ -839,7 +867,7 @@ script_update() {
     chmod +x "$OPT_DIR/$SCRIPT"
     print_message "Скрипт успешно обновлён" "$GREEN"
     sleep 1
-    "$OPT_DIR/$SCRIPT"
+    exec "$OPT_DIR/$SCRIPT"
   else
     print_message "Скрипт не был загружен" "$RED"
     exit_function
@@ -871,7 +899,7 @@ show_progress() {
     if [ -f "$file_path" ]; then
       downloaded=$(ls -l "$file_path" | awk '{print $5}')
       progress=$((downloaded * 100 / total_size))
-      printf "\rЗагружаю $file_path... (%d%%)" "$progress"
+      printf "\rЗагрузка $file_path... (%d%%)" "$progress"
     fi
     sleep 1
   done
@@ -897,7 +925,10 @@ ota_update() {
   exit_main_menu
   dir_count=$(echo "$DIRS" | wc -l)
   while true; do
-    read -p "Выберите модель (от 1 до $dir_count): " DIR_NUM
+    if ! read -r -p "Выберите модель (от 1 до $dir_count): " DIR_NUM; then
+      echo ""
+      exit 0
+    fi
     if [ "$DIR_NUM" = "00" ]; then
       main_menu
     fi
@@ -926,7 +957,10 @@ ota_update() {
     exit_main_menu
     file_count=$(echo "$BIN_FILES" | wc -l)
     while true; do
-      read -p "Выберите прошивку (от 1 до $file_count): " FILE_NUM
+      if ! read -r -p "Выберите прошивку (от 1 до $file_count): " FILE_NUM; then
+        echo ""
+        exit 0
+      fi
       if [ "$FILE_NUM" = "00" ]; then
         unset FILE
         unset DOWNLOAD_PATH
@@ -949,6 +983,10 @@ ota_update() {
       exit_function
     fi
     total_size=$(curl -fsSIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
+    if ! echo "$total_size" | grep -qE '^[0-9]+$' || [ "$total_size" -le 0 ]; then
+      print_message "Не удалось определить размер файла прошивки" "$RED"
+      exit_function
+    fi
     ram_size=$(get_ram_size)
     total_size_mb=$((total_size / 1024 / 1024))
     free_space_mb=$(get_internal_storage_size free)
@@ -989,19 +1027,24 @@ ota_update() {
     y | Y)
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
       print_message "Прошивка успешно обновлена" "$GREEN"
+      rm -f "$DOWNLOAD_PATH/$FILE"
+      rm -f "$DOWNLOAD_PATH/md5sum"
+      sleep 1
+      print_message "Перезагрузка устройства..." "${CYAN}"
+      reboot
       ;;
     n | N)
       rm -f "$DOWNLOAD_PATH/$FILE"
       rm -f "$DOWNLOAD_PATH/md5sum"
       exit_function
       ;;
-    *) ;;
+    *)
+      print_message "Неверный выбор" "$RED"
+      rm -f "$DOWNLOAD_PATH/$FILE"
+      rm -f "$DOWNLOAD_PATH/md5sum"
+      exit_function
+      ;;
     esac
-    rm -f "$DOWNLOAD_PATH/$FILE"
-    rm -f "$DOWNLOAD_PATH/md5sum"
-    sleep 1
-    print_message "Перезагружаю устройство..." "${CYAN}"
-    reboot
   fi
 }
 
@@ -1077,7 +1120,7 @@ update_firmware_dual() {
   fi
 
   print_message "Переключаюсь на $new_slot слот" "$CYAN"
-  if ! set_boot_slot "$new_slot" "$current_slot" "update_mode"; then
+  if ! set_boot_slot; then
     print_message "Ошибка при переключении слота на $new_slot." "$RED"
     return 1
   fi
@@ -1200,7 +1243,7 @@ firmware_manual_update() {
       ;;
     *) ;;
     esac
-    print_message "Перезагружаю устройство..." "${CYAN}"
+    print_message "Перезагрузка устройства..." "${CYAN}"
     sleep 1
     reboot
     ;;
@@ -1434,6 +1477,9 @@ service() {
   mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
   if [ -n "$mtdFile" ]; then
     print_message "Новые сервисные данные сохранены в $mtdFile" "$GREEN"
+  else
+    print_message "Не удалось подготовить новые сервисные данные" "$RED"
+    exit_function
   fi
   read -p "Продолжить замену? (y/n) " item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -1478,7 +1524,7 @@ changeLanguage() {
   print_message "Switching..." "$CYAN"
   if curl -fL -s "https://raw.githubusercontent.com/$USERNAME/$REPO/${BRANCH_NEW}/install.sh" --output /tmp/install.sh &&
     [ -s /tmp/install.sh ]; then
-    sh /tmp/install.sh
+    exec sh /tmp/install.sh
   else
     print_message "Error switching" "$RED"
     exit_function
