@@ -1,5 +1,5 @@
 #!/bin/sh
-trap cleanup INT TERM EXIT
+trap cleanup HUP INT TERM EXIT
 export LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
 RED='\033[1;31m'
 GREEN='\033[1;32m'
@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.5.3"
+SCRIPT_VERSION="2.5.5"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -64,14 +64,19 @@ EOF
 }
 
 main_menu() {
-  print_menu
-  read -p "Select action: " choice
-  echo ""
-  choice=$(echo "$choice" | tr -d '\032' | tr -d '[A-Z]')
+  while true; do
+    print_menu
+    if ! read -r -p "Select action: " choice; then
+      echo ""
+      exit 0
+    fi
+    echo ""
+    choice=$(echo "$choice" | tr -d '\032' | tr -d '[A-Z]')
 
-  if [ -z "$choice" ]; then
-    main_menu
-  else
+    if [ -z "$choice" ]; then
+      continue
+    fi
+
     case "$choice" in
     1) firmware_manual_update ;;
     2) backup_block ;;
@@ -80,17 +85,16 @@ main_menu() {
     5) ota_update ;;
     6) service ;;
     7) switch_boot_slot ;;
-    00) exit ;;
+    00) exit 0 ;;
     77) changeLanguage ;;
     88) packages_delete ;;
     99) script_update ;;
     *)
       echo "Invalid selection, please try again."
       sleep 1
-      main_menu
       ;;
     esac
-  fi
+  done
 }
 
 print_message() {
@@ -411,7 +415,7 @@ switch_boot_slot() {
     ;;
   esac
 
-  print_message "Switching the slot $current_slot wipers $new_slot" "$CYAN"
+  print_message "Switching the slot $current_slot on $new_slot" "$CYAN"
 
   if ! copy_dual_config "$current_slot" "$new_slot"; then
     print_message "Error copying configuration, slot will not be switched." "$RED"
@@ -635,7 +639,7 @@ perform_dd() {
   output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
 
   if echo "$output" | grep -iq "error\|can't"; then
-    print_message "Error overwriting partition" "$RED"
+    print_message "Error overwriting partition. Please use loader" "$RED"
     umountFS
     exit_function
   fi
@@ -673,14 +677,66 @@ checking_mtd_size() {
   return 0
 }
 
+select_drive_extract_value() {
+  echo "$1" | cut -d ':' -f2- | sed 's/^[[:space:]]*//; s/[",]//g'
+}
+
+select_drive_reset_partition() {
+  in_partition=0
+  uuid=""
+  label=""
+  fstype=""
+  total_bytes=""
+  free_bytes=""
+}
+
+select_drive_reset_media() {
+  media_found=1
+  media_is_usb=0
+  current_manufacturer=""
+  select_drive_reset_partition
+}
+
+select_drive_add_partition() {
+  local used_bytes display_name fstype_upper
+
+  if [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ]; then
+    select_drive_reset_partition
+    return
+  fi
+
+  echo "$total_bytes" | grep -qE '^[0-9]+$' || total_bytes=0
+  echo "$free_bytes" | grep -qE '^[0-9]+$' || free_bytes=0
+
+  used_bytes=$((total_bytes - free_bytes))
+  [ "$used_bytes" -lt 0 ] && used_bytes=0
+
+  if [ -n "$label" ]; then
+    display_name="$label"
+  elif [ -n "$current_manufacturer" ]; then
+    display_name="$current_manufacturer"
+  else
+    display_name="Unknown"
+  fi
+
+  fstype_upper=$(echo "$fstype" | tr '[:lower:]' '[:upper:]')
+  echo "$index. $display_name ($fstype_upper, $(format_size $used_bytes $total_bytes))"
+  uuids="$uuids $uuid"
+  index=$((index + 1))
+  select_drive_reset_partition
+}
+
 select_drive() {
   local message="$1"
-  labels=""
+  local value
+
   uuids=""
   index=2
   media_found=0
+  media_is_usb=0
   media_output=$(ndmc -c show media)
   current_manufacturer=""
+  select_drive_reset_partition
 
   if [ -z "$media_output" ]; then
     print_message "Getting list failed." "$RED"
@@ -691,49 +747,41 @@ select_drive() {
   echo "1. On-Box Storage ($(get_internal_storage_size))"
 
   while IFS= read -r line; do
+    value=$(select_drive_extract_value "$line")
     case "$line" in
-    *"name: Media"*)
-      media_found=1
-      current_manufacturer=""
+    *"\"Media"*"\":"* | *"name: Media"*)
+      select_drive_reset_media
       ;;
-    *"manufacturer:"*)
-      if [ "$media_found" = "1" ]; then
-        current_manufacturer=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
+    *"\"bus\":"* | *"bus:"*)
+      if [ "$media_found" = "1" ] && [ "$value" = "usb" ]; then
+        media_is_usb=1
       fi
       ;;
-    *"uuid:"*)
+    *"\"manufacturer\":"* | *"manufacturer:"*)
       if [ "$media_found" = "1" ]; then
-        uuid=$(echo "$line" | cut -d ':' -f2- | sed 's/^ *//g')
-        read -r label_line
-        read -r fstype_line
-        read -r state_line
-        read -r total_line
-        read -r free_line
-
-        label=$(echo "$label_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        fstype=$(echo "$fstype_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        total_bytes=$(echo "$total_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        free_bytes=$(echo "$free_line" | cut -d ':' -f2- | sed 's/^ *//g')
-        used_bytes=$((total_bytes - free_bytes))
-
-        if [ "$fstype" = "swap" ]; then
-          uuid=""
-          continue
-        fi
-
-        if [ -n "$label" ]; then
-          display_name="$label"
-        elif [ -n "$current_manufacturer" ]; then
-          display_name="$current_manufacturer"
-        else
-          display_name="Unknown"
-        fi
-
-        echo "$index. $display_name ($(echo "$fstype" | tr '[:lower:]' '[:upper:]'), $(format_size $used_bytes $total_bytes))"
-        labels="$labels \"$display_name\""
-        uuids="$uuids $uuid"
-        index=$((index + 1))
-        uuid=""
+        current_manufacturer="$value"
+      fi
+      ;;
+    *"\"uuid\":"* | *"uuid:"*)
+      if [ "$media_found" = "1" ] && [ "$media_is_usb" = "1" ]; then
+        select_drive_reset_partition
+        in_partition=1
+        uuid="$value"
+      fi
+      ;;
+    *"\"label\":"* | *"label:"*)
+      [ "$in_partition" = "1" ] && label="$value"
+      ;;
+    *"\"fstype\":"* | *"fstype:"*)
+      [ "$in_partition" = "1" ] && fstype="$value"
+      ;;
+    *"\"total\":"* | *"total:"*)
+      [ "$in_partition" = "1" ] && total_bytes="$value"
+      ;;
+    *"\"free\":"* | *"free:"*)
+      if [ "$in_partition" = "1" ]; then
+        free_bytes="$value"
+        select_drive_add_partition
       fi
       ;;
     esac
@@ -742,7 +790,10 @@ $media_output
 EOF
 
   exit_main_menu
-  read -p "$message " choice
+  if ! read -r -p "$message " choice; then
+    echo ""
+    exit 0
+  fi
   choice=$(echo "$choice" | tr -d ' \n\r')
   if [ "$choice" = "00" ]; then
     main_menu
@@ -816,7 +867,13 @@ backup_config() {
 
 exit_function() {
   echo ""
-  read -n 1 -s -r -p "Press any key to return..."
+  if [ ! -t 0 ]; then
+    exit 0
+  fi
+  if ! read -n 1 -s -r -p "Press any key to return..."; then
+    echo ""
+    exit 0
+  fi
   pkill -P $$ 2>/dev/null
   exec "$OPT_DIR/$SCRIPT"
 }
@@ -839,7 +896,7 @@ script_update() {
     chmod +x "$OPT_DIR/$SCRIPT"
     print_message "Script updated successfully" "$GREEN"
     sleep 1
-    "$OPT_DIR/$SCRIPT"
+    exec "$OPT_DIR/$SCRIPT"
   else
     print_message "Script was not loaded" "$RED"
     exit_function
@@ -897,7 +954,10 @@ ota_update() {
   exit_main_menu
   dir_count=$(echo "$DIRS" | wc -l)
   while true; do
-    read -p "Select Model (-1 to No.  $dir_count): " DIR_NUM
+    if ! read -r -p "Select Model (-1 to No.  $dir_count): " DIR_NUM; then
+      echo ""
+      exit 0
+    fi
     if [ "$DIR_NUM" = "00" ]; then
       main_menu
     fi
@@ -926,7 +986,10 @@ ota_update() {
     exit_main_menu
     file_count=$(echo "$BIN_FILES" | wc -l)
     while true; do
-      read -p "Select Firmware (-1 to No.  $file_count): " FILE_NUM
+      if ! read -r -p "Select Firmware (-1 to No.  $file_count): " FILE_NUM; then
+        echo ""
+        exit 0
+      fi
       if [ "$FILE_NUM" = "00" ]; then
         unset FILE
         unset DOWNLOAD_PATH
@@ -949,6 +1012,10 @@ ota_update() {
       exit_function
     fi
     total_size=$(curl -fsSIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
+    if ! echo "$total_size" | grep -qE '^[0-9]+$' || [ "$total_size" -le 0 ]; then
+      print_message "Failed to determine firmware file size" "$RED"
+      exit_function
+    fi
     ram_size=$(get_ram_size)
     total_size_mb=$((total_size / 1024 / 1024))
     free_space_mb=$(get_internal_storage_size free)
@@ -989,19 +1056,24 @@ ota_update() {
     y | Y)
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
       print_message "Firmware updated successfully" "$GREEN"
+      rm -f "$DOWNLOAD_PATH/$FILE"
+      rm -f "$DOWNLOAD_PATH/md5sum"
+      sleep 1
+      print_message "Rebooting the device..." "${CYAN}"
+      reboot
       ;;
     n | N)
       rm -f "$DOWNLOAD_PATH/$FILE"
       rm -f "$DOWNLOAD_PATH/md5sum"
       exit_function
       ;;
-    *) ;;
+    *)
+      print_message "Invalid selection" "$RED"
+      rm -f "$DOWNLOAD_PATH/$FILE"
+      rm -f "$DOWNLOAD_PATH/md5sum"
+      exit_function
+      ;;
     esac
-    rm -f "$DOWNLOAD_PATH/$FILE"
-    rm -f "$DOWNLOAD_PATH/md5sum"
-    sleep 1
-    print_message "Rebooting the device..." "${CYAN}"
-    reboot
   fi
 }
 
@@ -1434,6 +1506,9 @@ service() {
   mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
   if [ -n "$mtdFile" ]; then
     print_message "New service data saved to $mtdFile" "$GREEN"
+  else
+    print_message "Failed to prepare new service data" "$RED"
+    exit_function
   fi
   read -p "Continue replacement? (y/n) " item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -1478,7 +1553,7 @@ changeLanguage() {
   print_message "Switching..." "$CYAN"
   if curl -fL -s "https://raw.githubusercontent.com/$USERNAME/$REPO/${BRANCH_NEW}/install.sh" --output /tmp/install.sh &&
     [ -s /tmp/install.sh ]; then
-    sh /tmp/install.sh
+    exec sh /tmp/install.sh
   else
     print_message "Error switching" "$RED"
     exit_function
