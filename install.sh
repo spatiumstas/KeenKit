@@ -34,4 +34,4 @@ mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
 chmod +x $OPT_DIR/$SCRIPT
 cd $OPT_DIR/bin
 ln -sf $OPT_DIR/$SCRIPT $OPT_DIR/bin/keenkit
-$OPT_DIR/$SCRIPT
+exec $OPT_DIR/$SCRIPT
