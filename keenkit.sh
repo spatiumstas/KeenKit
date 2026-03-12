@@ -13,12 +13,15 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.5.5"
+SCRIPT_VERSION="2.6"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
-REMOTE_VERSION=$(curl -s --max-time 2 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
+VERSION_INFO=""
+SYSTEM_INFO=""
+INTERFACE_INFO=""
+ARCHITECTURE=""
 
 print_menu() {
   printf "\033c"
@@ -107,12 +110,12 @@ print_message() {
 print_models_with_highlight() {
   local models="$1"
   local current_model="$2"
-  
+
   local i=1
   while IFS= read -r model; do
     local model_lower=$(echo "$model" | tr '[:upper:]' '[:lower:]')
     local current_lower=$(echo "$current_model" | tr '[:upper:]' '[:lower:]')
-    
+
     if [[ "$model_lower" == *"$current_lower"* ]] || \
        [[ "$current_lower" == *"$model_lower"* ]]; then
       printf "%d. ${CYAN}%s${NC}\n" "$i" "$model"
@@ -130,40 +133,78 @@ rci_request() {
   curl -s "http://localhost:79/rci/$endpoint"
 }
 
-rci_show_version() {
-  local now
-  now=$(date +%s)
-  case "$RCI_VERSION_CACHE_TS" in
-  '' | *[!0-9]*)
+rci_parse() {
+  local command="$1"
+  curl -fsS -H "Content-Type: application/json" \
+    -d "[{\"parse\":\"$command\"}]" \
+    "http://localhost:79/rci/"
+}
+
+get_version_info() {
+  if [ -z "$VERSION_INFO" ]; then
+    VERSION_INFO=$(rci_request "show/version")
+  fi
+  echo "$VERSION_INFO"
+}
+
+get_system_info() {
+  if [ -z "$SYSTEM_INFO" ]; then
+    SYSTEM_INFO=$(rci_request "show/system")
+  fi
+  echo "$SYSTEM_INFO"
+}
+
+get_interface_info() {
+  if [ -z "$INTERFACE_INFO" ]; then
+    INTERFACE_INFO=$(rci_request "show/interface")
+  fi
+  echo "$INTERFACE_INFO"
+}
+
+native_fwupdate() {
+  local firmware="$1"
+  local firmware_rci_path response
+  local device_uuid
+
+  case "$firmware" in
+  "$STORAGE_DIR"/*)
+    firmware_rci_path="storage:/${firmware#"$STORAGE_DIR"/}"
+    ;;
+  "$TMP_DIR"/*)
+    firmware_rci_path="temp:/${firmware#"$TMP_DIR"/}"
+    ;;
+  /tmp/mnt/*/*)
+    device_uuid=$(echo "$firmware" | awk -F'/' '{print $4}')
+    firmware_rci_path="$device_uuid:/${firmware#"/tmp/mnt/$device_uuid"/}"
     ;;
   *)
-    if [ -n "$RCI_VERSION_CACHE" ] && [ $((now - RCI_VERSION_CACHE_TS)) -lt 5 ]; then
-      echo "$RCI_VERSION_CACHE"
-      return
-    fi
+    return 1
     ;;
   esac
 
-  RCI_VERSION_CACHE=$(rci_request "show/version")
-  RCI_VERSION_CACHE_TS="$now"
-  echo "$RCI_VERSION_CACHE"
+  if ! response=$(rci_parse "copy $firmware_rci_path flash:/firmware" 2>&1); then
+    return 1
+  fi
+
+  echo "$response" | grep -q "update done"
 }
 
 check_update() {
+  REMOTE_VERSION=$(curl -s --max-time 1 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
   [ -z "$REMOTE_VERSION" ] && return
   [ "$REMOTE_VERSION" != "$SCRIPT_VERSION" ] && printf " | ${GREEN}Available $REMOTE_VERSION${NC}"
 }
 
 get_device() {
-  rci_show_version | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  get_version_info | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_fw_version() {
-  rci_show_version | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  get_version_info | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 get_hw_id() {
-  rci_show_version | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  get_version_info | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
 }
 
 format_uptime_seconds() {
@@ -184,7 +225,7 @@ format_uptime_seconds() {
 }
 
 get_uptime() {
-  local uptime=$(rci_request "show/system" | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
+  local uptime=$(get_system_info | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
   format_uptime_seconds "$uptime"
 }
 
@@ -199,10 +240,10 @@ get_mws_members() {
   if ! command -v jq >/dev/null 2>&1; then
     return 0
   fi
-  
+
   local repeater_data
   repeater_data=$(echo "$mws_json" | jq -r '
-    .[] | 
+    .[] |
     select(.model != null) |
     "\(.model)|" +
     "\(.fw // "null")|" +
@@ -216,14 +257,14 @@ get_mws_members() {
   local first=true
   while IFS='|' read -r model fw uptime speed; do
     local output_line=""
-    
+
     if [ "$fw" != "null" ]; then
       local uptime_formatted=$(format_uptime_seconds "$uptime")
       output_line=$(printf "%s | %s | %s Mbit/с | %s" "$model" "$fw" "$speed" "$uptime_formatted")
     else
       output_line=$(printf "%s | ${RED}offline PED${NC}" "$model")
     fi
-    
+
     if [ "$first" = "true" ]; then
       result="${output_line}"
       first=false
@@ -238,7 +279,7 @@ EOF
 }
 
 get_ram_usage() {
-  local memory=$(rci_request "show/system" | grep -o '"memory": "[^"]*"' | cut -d'"' -f4 2>/dev/null)
+  local memory=$(get_system_info | grep -o '"memory": "[^"]*"' | cut -d'"' -f4 2>/dev/null)
   local used=$(echo "$memory" | cut -d'/' -f1)
   local total=$(echo "$memory" | cut -d'/' -f2)
   printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
@@ -310,7 +351,7 @@ get_internal_storage_size() {
 }
 
 get_ram_size() {
-  rci_request "show/system" | grep -o '"memtotal": [0-9]*' | cut -d' ' -f2 | awk '{print int($1 / 1024)}' 2>/dev/null
+  get_system_info | grep -o '"memtotal": [0-9]*' | cut -d' ' -f2 | awk '{print int($1 / 1024)}' 2>/dev/null
 }
 
 get_boot_current() {
@@ -366,29 +407,10 @@ copy_dual_config() {
   return 0
 }
 
-set_boot_slot() {
-  local new_slot="$1"
-  local current_slot="$2"
-  local update_mode="$3"
-
-  if [ -z "$new_slot" ] || [ -z "$current_slot" ]; then
-    print_message "Unknown slot values (current: $current_slot, new: $new_slot)" "$RED"
-    return 1
-  fi
-
-  if ! echo "$new_slot" | grep -qE '^[0-9]+$'; then
-    print_message "Invalid new slot: $new_slot" "$RED"
-    return 1
-  fi
-
-  if [ -n "$update_mode" ]; then
-    echo 0 >/proc/dual_image/boot_active || return 1
-  else
-    echo "$new_slot" >/proc/dual_image/boot_active || return 1
-  fi
-  echo "$current_slot" >/proc/dual_image/boot_backup || true
-  echo 0 >/proc/dual_image/boot_fails || true
-  echo 0 >/proc/dual_image/commit || true
+change_boot_slot() {
+  rci_parse "copy proc:/dual_image/boot_active proc:/dual_image/boot_backup" >/dev/null 2>&1 || return 1
+  rci_parse "copy proc:/dual_image/boot_fails proc:/dual_image/boot_active" >/dev/null 2>&1 || return 1
+  rci_parse "copy proc:/dual_image/boot_fails proc:/dual_image/commit" >/dev/null 2>&1 || return 1
 
   return 0
 }
@@ -422,7 +444,7 @@ switch_boot_slot() {
     exit_function
   fi
 
-  if set_boot_slot "$new_slot" "$current_slot"; then
+  if change_boot_slot; then
     print_message "Slot successfully switched to $new_slot. A reboot is required to apply." "$GREEN"
     read -p "Restart your router? (y/n) " reboot_ans
     reboot_ans=$(echo "$reboot_ans" | tr -d ' \n\r')
@@ -445,18 +467,36 @@ get_ndm_storage() {
 }
 
 get_architecture() {
-  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
+  if [ -z "$ARCHITECTURE" ]; then
+    local arch
+    arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
 
-  case "$arch" in
-  "mips-3") echo "mips" ;;
-  "mipsel-3") echo "mipsel" ;;
-  "aarch64-3") echo "aarch64" ;;
-  *) echo "unknown_arch" ;;
-  esac
+    case "$arch" in
+    "mips-3") ARCHITECTURE="mips" ;;
+    "mipsel-3") ARCHITECTURE="mipsel" ;;
+    "aarch64-3") ARCHITECTURE="aarch64" ;;
+    *) ARCHITECTURE="unknown_arch" ;;
+    esac
+  fi
+
+  echo "$ARCHITECTURE"
 }
 
 get_radio_temp() {
-  rci_request "show/interface/$1" | grep -o '"temperature": *[0-9]*' | grep -o '[0-9]*' | head -n1
+  get_interface_info | awk -v iface="$1" '
+    !in_iface {
+      pos = index($0, "\"" iface "\"")
+      if (pos) {
+        in_iface = 1
+        $0 = substr($0, pos)
+      }
+    }
+    in_iface && match($0, /"temperature": *[0-9]+/) {
+      print substr($0, RSTART, RLENGTH)
+      exit
+    }
+    in_iface && /}/ { in_iface=0 }
+  ' | grep -o '[0-9]*' | head -n1
 }
 
 get_temperatures() {
@@ -495,7 +535,7 @@ get_temperatures() {
 }
 
 get_cpu_model() {
-  cpu_list="EN75[0-9A-Za-z]* MT76[0-9A-Za-z]* MT79[0-9A-Za-z]*"
+  cpu_list="MT76[0-9A-Za-z]* MT79[0-9A-Za-z]* EN75[0-9A-Za-z]*"
   for pattern in $cpu_list; do
     found=$(strings /lib/libndmMwsController.so 2>/dev/null | grep -oE "$pattern" | head -n 1)
     if [ -n "$found" ]; then
@@ -636,6 +676,8 @@ perform_dd() {
   local output_file="$2"
 
   checking_mtd_size "$input_file" "$output_file" || return 1
+  sync
+  echo 3 >/proc/sys/vm/drop_caches || true
   output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
 
   if echo "$output" | grep -iq "error\|can't"; then
@@ -700,7 +742,7 @@ select_drive_reset_media() {
 select_drive_add_partition() {
   local used_bytes display_name fstype_upper
 
-  if [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ]; then
+  if [ -z "$uuid" ] || [ -z "$fstype" ] || [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ]; then
     select_drive_reset_partition
     return
   fi
@@ -721,7 +763,12 @@ select_drive_add_partition() {
 
   fstype_upper=$(echo "$fstype" | tr '[:lower:]' '[:upper:]')
   echo "$index. $display_name ($fstype_upper, $(format_size $used_bytes $total_bytes))"
-  uuids="$uuids $uuid"
+  if [ -n "$uuids" ]; then
+    uuids="$uuids
+$uuid"
+  else
+    uuids="$uuid"
+  fi
   index=$((index + 1))
   select_drive_reset_partition
 }
@@ -734,7 +781,7 @@ select_drive() {
   index=2
   media_found=0
   media_is_usb=0
-  media_output=$(ndmc -c show media)
+  media_output=$(rci_parse "show media")
   current_manufacturer=""
   select_drive_reset_partition
 
@@ -751,6 +798,11 @@ select_drive() {
     case "$line" in
     *"\"Media"*"\":"* | *"name: Media"*)
       select_drive_reset_media
+      ;;
+    *"\"usb\":"* | *"usb:"*)
+      if [ "$media_found" = "1" ]; then
+        media_is_usb=1
+      fi
       ;;
     *"\"bus\":"* | *"bus:"*)
       if [ "$media_found" = "1" ] && [ "$value" = "usb" ]; then
@@ -804,7 +856,7 @@ EOF
   1) selected_drive="$STORAGE_DIR" ;;
   *)
     if [ -n "$uuids" ]; then
-      selected_drive=$(echo "$uuids" | awk -v choice="$choice" '{split($0, a, " "); print a[choice-1]}')
+      selected_drive=$(printf '%s\n' "$uuids" | sed -n "$((choice - 1))p")
       if [ -z "$selected_drive" ]; then
         print_message "Invalid selection" "$RED"
         exit_function
@@ -847,7 +899,7 @@ backup_config() {
         local folder_path="$device_uuid:/backup$DATE"
         local backup_file="$folder_path/$(get_hw_id)_$(get_fw_version)_startup-config.txt"
         mkdir -p "$selected_drive/backup$DATE"
-        ndmc -c "copy startup-config $backup_file"
+        rci_parse "copy startup-config $backup_file" >/dev/null 2>&1
 
         if [ $? -eq 0 ]; then
           print_message "Startup-config saved to $backup_file" "$GREEN"
@@ -928,7 +980,7 @@ show_progress() {
     if [ -f "$file_path" ]; then
       downloaded=$(ls -l "$file_path" | awk '{print $5}')
       progress=$((downloaded * 100 / total_size))
-      printf "\rLoading... $file_path... (%d%%)" "$progress"
+      printf "\rLoading $file_path... (%d%%)" "$progress"
     fi
     sleep 1
   done
@@ -950,7 +1002,7 @@ ota_update() {
   local current_device_model=$(get_device)
   echo "Models available:"
   print_models_with_highlight "$DIRS" "$current_device_model"
-  
+
   exit_main_menu
   dir_count=$(echo "$DIRS" | wc -l)
   while true; do
@@ -1055,25 +1107,30 @@ ota_update() {
     case "$CONFIRM" in
     y | Y)
       update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
-      print_message "Firmware updated successfully" "$GREEN"
-      rm -f "$DOWNLOAD_PATH/$FILE"
-      rm -f "$DOWNLOAD_PATH/md5sum"
-      sleep 1
-      print_message "Rebooting the device..." "${CYAN}"
-      reboot
-      ;;
-    n | N)
-      rm -f "$DOWNLOAD_PATH/$FILE"
-      rm -f "$DOWNLOAD_PATH/md5sum"
-      exit_function
+      update_rc=$?
       ;;
     *)
-      print_message "Invalid selection" "$RED"
-      rm -f "$DOWNLOAD_PATH/$FILE"
-      rm -f "$DOWNLOAD_PATH/md5sum"
-      exit_function
+      if [ "$CONFIRM" != "n" ] && [ "$CONFIRM" != "N" ]; then
+        print_message "Invalid selection" "$RED"
+      fi
       ;;
     esac
+
+    rm -f "$DOWNLOAD_PATH/$FILE"
+    rm -f "$DOWNLOAD_PATH/md5sum"
+
+    if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+      if [ "$update_rc" -eq 2 ]; then
+        exit 0
+      fi
+      if [ "$update_rc" -ne 2 ]; then
+        print_message "Firmware updated successfully. Reboot device..." "$GREEN"
+        sleep 1
+        reboot
+      fi
+    else
+      exit_function
+    fi
   fi
 }
 
@@ -1141,6 +1198,10 @@ update_firmware_dual() {
   esac
 
   print_message "Current Slot: $current_slot. Writing the firmware into the slot: $new_slot" "$CYAN"
+  if native_fwupdate "$firmware"; then
+    print_message "Firmware updated successfully. Reboot device..." "$GREEN"
+    return 2
+  fi
   perform_dd "$firmware" "/dev/mtdblock$target_fw_slot"
 
   if ! copy_dual_config "$current_slot" "$new_slot"; then
@@ -1149,7 +1210,7 @@ update_firmware_dual() {
   fi
 
   print_message "Switching to $new_slot slot" "$CYAN"
-  if ! set_boot_slot "$new_slot" "$current_slot" "update_mode"; then
+  if ! change_boot_slot; then
     print_message "Error switching slot to $new_slot." "$RED"
     return 1
   fi
@@ -1163,6 +1224,8 @@ update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
   local arch
+  local updater
+  local rc1
   arch="$(get_architecture)"
 
   if [ "$arch" = "aarch64" ]; then
@@ -1174,7 +1237,7 @@ update_firmware_block() {
       case "$confirm" in
       y | Y) ;;
       n | N) exit_function ;;
-      *) ;; 
+      *) ;;
       esac
     fi
   fi
@@ -1182,7 +1245,7 @@ update_firmware_block() {
   updater="update_firmware_legacy"
   if ! ([ "$arch" = "aarch64" ] && get_host); then
     if ! legacy_bootloader; then
-      read -p "To Use dual-image Update mode? (For confident users) (y/n) " rc1
+      read -p "Using dual-image Update mode? (For confident users) (y/n) " rc1
       rc1=$(echo "$rc1" | tr -d ' \n\r')
       case "$rc1" in
       y | Y) updater="update_firmware_dual" ;;
@@ -1258,6 +1321,10 @@ firmware_manual_update() {
   case "$item_rc1" in
   y | Y)
     update_firmware_block "$Firmware" "$use_mount"
+    update_rc=$?
+    if [ "$update_rc" -eq 2 ]; then
+      exit 0
+    fi
     print_message "Firmware updated successfully" "$GREEN"
     printf "${NC}"
     read -p "Delete update file? (y/n) " item_rc2
@@ -1272,7 +1339,7 @@ firmware_manual_update() {
       ;;
     *) ;;
     esac
-    print_message "Rebooting the device..." "${CYAN}"
+    print_message "Rebooting Device..." "${CYAN}"
     sleep 1
     reboot
     ;;
@@ -1289,7 +1356,7 @@ backup_block() {
   printf "99. Backup all sections${NC}\n"
   exit_main_menu
   folder_path="$selected_drive/backup$DATE"
-  read -p "Specify the number of(а) Section(RH) separated by spaces: " choice
+  read -p "Specify the number of(а) Section(IP) separated by spaces: " choice
   echo ""
   choice=$(echo "$choice" | tr -d '\n\r')
 
@@ -1407,7 +1474,7 @@ rewrite_block() {
   echo "$mtd_output" | awk 'NR>1 {print $0}'
   exit_main_menu
   print_message "Attention! The bootloader is not overwritten!" "$RED"
-  read -p "Specify the number of(а) Section(RH) separated by spaces: " choice
+  read -p "Specify the number of(а) Section(IP) separated by spaces: " choice
   choice=$(echo "$choice" | tr -d '\n\r')
 
   if [ "$choice" = "00" ]; then
