@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.7"
+SCRIPT_VERSION="2.7.1"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -379,8 +379,8 @@ copy_dual_config() {
   local cfg_slot1 cfg_slot2 src_cfg_slot dst_cfg_slot
   local arch src_dev dst_dev
 
-  cfg_slot1=$(grep -w 'Config_1' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  cfg_slot2=$(grep -w 'Config_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  cfg_slot1=$(get_mtd_index_by_name "Config_1")
+  cfg_slot2=$(get_mtd_index_by_name "Config_2")
 
   if [ -z "$cfg_slot1" ] || [ -z "$cfg_slot2" ]; then
     print_message "Разделы Config_1/Config_2 не найдены, копирование конфигурации невозможно." "$RED"
@@ -597,6 +597,11 @@ get_modem() {
     fi
   done
   echo -e "$result"
+}
+
+get_mtd_index_by_name() {
+  local name="$1"
+  grep -w "$name" /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+'
 }
 
 get_host() {
@@ -1127,7 +1132,8 @@ ota_update() {
     case "$CONFIRM" in
     y | Y)
       if [ "$ota_mode" = "keenboot" ]; then
-        perform_dd "$DOWNLOAD_PATH/$FILE" "/dev/mtdblock0"
+        ubootSlot=$(get_mtd_index_by_name "U-Boot")
+        perform_dd "$DOWNLOAD_PATH/$FILE" "/dev/mtdblock$ubootSlot"
         update_rc=0
       else
         update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
@@ -1176,15 +1182,12 @@ update_firmware_legacy() {
     if [ "$partition" = "Firmware_2" ] && (get_ndm_storage || [ "$(get_boot_current)" = "1" ]); then
       continue
     fi
-    mtdSlot="$(grep -w "$partition" /proc/mtd)"
-    if [ -z "$mtdSlot" ]; then
-      sleep 1
-    else
-      result=$(echo "$mtdSlot" | sed -n 's/^mtd\([0-9][0-9]*\):.*/\1/p')
-      echo "Обновляю $partition..."
-      perform_dd "$firmware" "/dev/mtdblock$result"
-      echo ""
-    fi
+    mtd_index=$(get_mtd_index_by_name "$partition")
+    [ -z "$mtd_index" ] && continue
+
+    echo "Обновляю $partition..."
+    perform_dd "$firmware" "/dev/mtdblock$mtd_index"
+    echo ""
   done
 
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
@@ -1207,9 +1210,8 @@ update_firmware_dual() {
     return
   fi
 
-  fw_slot1=$(grep -w 'Firmware_1' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  fw_slot2=$(grep -w 'Firmware_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-
+  fw_slot1=$(get_mtd_index_by_name "Firmware_1")
+  fw_slot2=$(get_mtd_index_by_name "Firmware_2")
   case "$current_slot" in
   1)
     new_slot=2
@@ -1565,8 +1567,8 @@ service() {
   fi
 
   mkdir -p "$folder_path"
-  mtdSlot=$(grep -w 'U-Config' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  mtdSlot_res=$(grep -w 'U-Config_res' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  mtdSlot=$(get_mtd_index_by_name "U-Config")
+  mtdSlot_res=$(get_mtd_index_by_name "U-Config_res")
   if [ -n "$mtdSlot" ]; then
     perform_dd "/dev/mtd$mtdSlot" "$folder_path/U-Config.bin"
     if [ $? -eq 0 ]; then
