@@ -1,6 +1,6 @@
 #!/bin/sh
 trap cleanup HUP INT TERM EXIT
-export LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/opt/lib:/opt/usr/lib:$LD_LIBRARY_PATH
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
@@ -13,7 +13,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.7.1"
+SCRIPT_VERSION="2.7.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
