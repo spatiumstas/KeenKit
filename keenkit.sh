@@ -1,6 +1,8 @@
 #!/bin/sh
 trap cleanup HUP INT TERM EXIT
-export LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
+SYSTEM_LD_LIBRARY_PATH="/lib:/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+OPKG_LD_LIBRARY_PATH="/opt/lib:/opt/usr/lib:/lib:/usr/lib"
+export LD_LIBRARY_PATH="$OPKG_LD_LIBRARY_PATH"
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
@@ -13,7 +15,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.7.1"
+SCRIPT_VERSION="2.7.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -145,6 +147,10 @@ rci_parse() {
   curl -fsS -H "Content-Type: application/json" \
     -d "[{\"parse\":\"$command\"}]" \
     "http://localhost:79/rci/"
+}
+
+ndmc_cli() {
+  LD_LIBRARY_PATH="$SYSTEM_LD_LIBRARY_PATH" ndmc -c "$@"
 }
 
 get_version_info() {
@@ -562,13 +568,13 @@ get_cpu_model() {
 }
 
 get_modem() {
-  interfaces_list=$(ndmc -c show interface | grep -A 4 -E "UsbQmi[0-9]*|UsbLte[0-9]*" | grep "id:" | awk '{print $2}')
+  interfaces_list=$(ndmc_cli show interface | grep -A 4 -E "UsbQmi[0-9]*|UsbLte[0-9]*" | grep "id:" | awk '{print $2}')
   [ -z "$interfaces_list" ] && return
   result=""
   first=1
   pad="                  "
   for iface in $interfaces_list; do
-    info=$(ndmc -c show interface "$iface")
+    info=$(ndmc_cli show interface "$iface")
     plugged=$(echo "$info" | awk -F': ' '/plugged:/ {print $2; exit}')
     [ "$plugged" = "no" ] && continue
     product=$(echo "$info" | awk -F': ' '/product:/ {print $2; exit}')
