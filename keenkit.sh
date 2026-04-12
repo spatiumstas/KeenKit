@@ -1,6 +1,5 @@
 #!/bin/sh
 trap cleanup HUP INT TERM EXIT
-export LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 CYAN='\033[0;36m'
@@ -13,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.6"
+SCRIPT_VERSION="2.7.3"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -59,6 +58,9 @@ EOF
   if ! { [ "$arch" = "aarch64" ] && get_host; }; then
     echo "7. Switch Slot"
   fi
+  if is_uboot_writable; then
+    echo "8. KeenBOOT OTA Update"
+  fi
   printf "\n77. Сменить язык"
   printf "\n88. Delete used packages\n"
   echo "99. Update Script"
@@ -88,6 +90,7 @@ main_menu() {
     5) ota_update ;;
     6) service ;;
     7) switch_boot_slot ;;
+    8) ota_update "keenboot" ;;
     00) exit 0 ;;
     77) changeLanguage ;;
     88) packages_delete ;;
@@ -107,24 +110,27 @@ print_message() {
   printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
 }
 
-print_models_with_highlight() {
-  local models="$1"
+print_list_with_highlight() {
+  local items="$1"
   local current_model="$2"
 
-  local i=1
-  while IFS= read -r model; do
-    local model_lower=$(echo "$model" | tr '[:upper:]' '[:lower:]')
-    local current_lower=$(echo "$current_model" | tr '[:upper:]' '[:lower:]')
+  local normalized_current
+  normalized_current=$(echo "$current_model" | tr '[:upper:]' '[:lower:]' | sed 's/[_-]/ /g')
 
-    if [[ "$model_lower" == *"$current_lower"* ]] || \
-       [[ "$current_lower" == *"$model_lower"* ]]; then
-      printf "%d. ${CYAN}%s${NC}\n" "$i" "$model"
+  local i=1
+  while IFS= read -r item; do
+    local normalized_item
+    normalized_item=$(echo "$item" | tr '[:upper:]' '[:lower:]' | sed 's/[_-]/ /g')
+
+    if [[ "$normalized_item" == *"$normalized_current"* ]] || \
+       [[ "$normalized_current" == *"$normalized_item"* ]]; then
+      printf "%d. ${CYAN}%s${NC}\n" "$i" "$item"
     else
-      printf "%d. %s\n" "$i" "$model"
+      printf "%d. %s\n" "$i" "$item"
     fi
     i=$((i + 1))
   done <<EOF
-$models
+$items
 EOF
 }
 
@@ -138,6 +144,11 @@ rci_parse() {
   curl -fsS -H "Content-Type: application/json" \
     -d "[{\"parse\":\"$command\"}]" \
     "http://localhost:79/rci/"
+}
+
+ndmc_cli() {
+  unset LD_LIBRARY_PATH
+  ndmc -c "$@"
 }
 
 get_version_info() {
@@ -358,14 +369,22 @@ get_boot_current() {
   cat /proc/dual_image/boot_current 2>/dev/null
 }
 
+is_uboot_writable() {
+  if [ "$(cat /sys/class/mtd/mtd0/flags 2>/dev/null)" = "0x400" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 copy_dual_config() {
   local current_slot="$1"
   local new_slot="$2"
   local cfg_slot1 cfg_slot2 src_cfg_slot dst_cfg_slot
   local arch src_dev dst_dev
 
-  cfg_slot1=$(grep -w 'Config_1' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  cfg_slot2=$(grep -w 'Config_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  cfg_slot1=$(get_mtd_index_by_name "Config_1")
+  cfg_slot2=$(get_mtd_index_by_name "Config_2")
 
   if [ -z "$cfg_slot1" ] || [ -z "$cfg_slot2" ]; then
     print_message "Sections Config_1/Config_2 not found, configuration cannot be copied." "$RED"
@@ -547,13 +566,13 @@ get_cpu_model() {
 }
 
 get_modem() {
-  interfaces_list=$(ndmc -c show interface | grep -A 4 -E "UsbQmi[0-9]*|UsbLte[0-9]*" | grep "id:" | awk '{print $2}')
+  interfaces_list=$(ndmc_cli show interface | grep -A 4 -E "UsbQmi[0-9]*|UsbLte[0-9]*" | grep "id:" | awk '{print $2}')
   [ -z "$interfaces_list" ] && return
   result=""
   first=1
   pad="                  "
   for iface in $interfaces_list; do
-    info=$(ndmc -c show interface "$iface")
+    info=$(ndmc_cli show interface "$iface")
     plugged=$(echo "$info" | awk -F': ' '/plugged:/ {print $2; exit}')
     [ "$plugged" = "no" ] && continue
     product=$(echo "$info" | awk -F': ' '/product:/ {print $2; exit}')
@@ -582,6 +601,11 @@ get_modem() {
     fi
   done
   echo -e "$result"
+}
+
+get_mtd_index_by_name() {
+  local name="$1"
+  grep -w "$name" /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+'
 }
 
 get_host() {
@@ -961,6 +985,7 @@ mountFS() {
 }
 
 umountFS() {
+  sleep 1
   umount /tmp
   print_message "UnlockFS: true"
 }
@@ -989,8 +1014,16 @@ show_progress() {
 
 ota_update() {
   check_host
+  local ota_mode="${1:-firmware}"
+  if [ "$ota_mode" = "keenboot" ] && ! is_uboot_writable; then
+    main_menu
+  fi
   packages_checker "curl findutils jq"
-  osvault="$(get_osvault)/osvault"
+  if [ "$ota_mode" = "keenboot" ]; then
+    osvault="$(get_osvault)/files/keenboot/mipsel"
+  else
+    osvault="$(get_osvault)/osvault"
+  fi
   REQUEST=$(curl -fLsS "$osvault")
   DIRS=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
 
@@ -1000,13 +1033,11 @@ ota_update() {
   fi
 
   local current_device_model=$(get_device)
-  echo "Models available:"
-  print_models_with_highlight "$DIRS" "$current_device_model"
-
+  print_list_with_highlight "$DIRS" "$current_device_model"
   exit_main_menu
   dir_count=$(echo "$DIRS" | wc -l)
   while true; do
-    if ! read -r -p "Select Model (-1 to No.  $dir_count): " DIR_NUM; then
+    if ! read -r -p "Select Folder (-1 to No.  $dir_count): " DIR_NUM; then
       echo ""
       exit 0
     fi
@@ -1029,16 +1060,12 @@ ota_update() {
     printf "${RED}In the directory $DIR No files.${NC}\n"
     exit_function
   else
-    printf "\nFirmware for $DIR:\n"
-    i=1
-    echo "$BIN_FILES" | while IFS= read -r FILE; do
-      printf "%d. ${CYAN}%s${NC}\n" "$i" "$FILE"
-      i=$((i + 1))
-    done
+    printf "\nVersions for $DIR:\n"
+    print_list_with_highlight "$BIN_FILES" "$current_device_model"
     exit_main_menu
     file_count=$(echo "$BIN_FILES" | wc -l)
     while true; do
-      if ! read -r -p "Select Firmware (-1 to No.  $file_count): " FILE_NUM; then
+      if ! read -r -p "Select Version (-1 to No.  $file_count): " FILE_NUM; then
         echo ""
         exit 0
       fi
@@ -1068,10 +1095,9 @@ ota_update() {
       print_message "Failed to determine firmware file size" "$RED"
       exit_function
     fi
-    ram_size=$(get_ram_size)
     total_size_mb=$((total_size / 1024 / 1024))
     free_space_mb=$(get_internal_storage_size free)
-    if [ "$ram_size" -lt "$MIN_RAM_SIZE" ] || [ "$free_space_mb" -ge "$total_size_mb" ]; then
+    if [ "$free_space_mb" -ge "$total_size_mb" ]; then
       DOWNLOAD_PATH="$STORAGE_DIR"
       use_mount=true
     else
@@ -1101,13 +1127,21 @@ ota_update() {
       rm -f "$DOWNLOAD_PATH/md5sum"
       exit_function
     fi
-
+    if [ "$ota_mode" = "keenboot" ]; then
+      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
+    fi
     printf "${GREEN}MD5 hash matches${NC}\n\n"
     read -p "$(printf "Hired! ${GREEN}$FILE${NC} to update, that's right? (y/n) ")" CONFIRM
     case "$CONFIRM" in
     y | Y)
-      update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
-      update_rc=$?
+      if [ "$ota_mode" = "keenboot" ]; then
+        ubootSlot=$(get_mtd_index_by_name "U-Boot")
+        perform_dd "$DOWNLOAD_PATH/$FILE" "/dev/mtdblock$ubootSlot"
+        update_rc=0
+      else
+        update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
+        update_rc=$?
+      fi
       ;;
     *)
       if [ "$CONFIRM" != "n" ] && [ "$CONFIRM" != "N" ]; then
@@ -1124,9 +1158,14 @@ ota_update() {
         exit 0
       fi
       if [ "$update_rc" -ne 2 ]; then
-        print_message "Firmware updated successfully. Reboot device..." "$GREEN"
-        sleep 1
-        reboot
+        if [ "$ota_mode" = "keenboot" ]; then
+          print_message "Loader updated successfully" "$GREEN"
+          exit_function
+        else
+          print_message "Successfully updated. Restart device..." "$GREEN"
+          sleep 1
+          reboot
+        fi
       fi
     else
       exit_function
@@ -1146,15 +1185,12 @@ update_firmware_legacy() {
     if [ "$partition" = "Firmware_2" ] && (get_ndm_storage || [ "$(get_boot_current)" = "1" ]); then
       continue
     fi
-    mtdSlot="$(grep -w "$partition" /proc/mtd)"
-    if [ -z "$mtdSlot" ]; then
-      sleep 1
-    else
-      result=$(echo "$mtdSlot" | sed -n 's/^mtd\([0-9][0-9]*\):.*/\1/p')
-      echo "Updating $partition..."
-      perform_dd "$firmware" "/dev/mtdblock$result"
-      echo ""
-    fi
+    mtd_index=$(get_mtd_index_by_name "$partition")
+    [ -z "$mtd_index" ] && continue
+
+    echo "Updating $partition..."
+    perform_dd "$firmware" "/dev/mtdblock$mtd_index"
+    echo ""
   done
 
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
@@ -1177,15 +1213,8 @@ update_firmware_dual() {
     return
   fi
 
-  fw_slot1=$(grep -w 'Firmware_1' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  fw_slot2=$(grep -w 'Firmware_2' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-
-  if [ -z "$fw_slot1" ] || [ -z "$fw_slot2" ]; then
-    print_message "No Sections found Firmware_1/Firmware_2. I use the standard update mode." "$RED"
-    update_firmware_legacy "$firmware" "$use_mount"
-    return
-  fi
-
+  fw_slot1=$(get_mtd_index_by_name "Firmware_1")
+  fw_slot2=$(get_mtd_index_by_name "Firmware_2")
   case "$current_slot" in
   1)
     new_slot=2
@@ -1216,10 +1245,6 @@ update_firmware_dual() {
   fi
 }
 
-legacy_bootloader() {
-  hexdump -C /dev/mtd0 2>/dev/null | head -n 10 | grep -q "Breed"
-}
-
 update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
@@ -1242,16 +1267,10 @@ update_firmware_block() {
     fi
   fi
 
-  updater="update_firmware_legacy"
-  if ! ([ "$arch" = "aarch64" ] && get_host); then
-    if ! legacy_bootloader; then
-      read -p "Using dual-image Update mode? (For confident users) (y/n) " rc1
-      rc1=$(echo "$rc1" | tr -d ' \n\r')
-      case "$rc1" in
-      y | Y) updater="update_firmware_dual" ;;
-      *) ;;
-      esac
-    fi
+  if [ "$arch" = "aarch64" ] && get_host; then
+    updater="update_firmware_legacy"
+  else
+    updater="update_firmware_dual"
   fi
   $updater "$firmware" "$use_mount"
 }
@@ -1473,7 +1492,6 @@ rewrite_block() {
   mtd_output=$(cat /proc/mtd)
   echo "$mtd_output" | awk 'NR>1 {print $0}'
   exit_main_menu
-  print_message "Attention! The bootloader is not overwritten!" "$RED"
   read -p "Specify the number of(а) Section(IP) separated by spaces: " choice
   choice=$(echo "$choice" | tr -d '\n\r')
 
@@ -1487,8 +1505,7 @@ rewrite_block() {
 
   for part in $choice; do
     if [ "$part" = "0" ]; then
-      print_message "The bootloader is not overwritten!" "$RED"
-      continue
+      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
     fi
 
     if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
@@ -1553,8 +1570,8 @@ service() {
   fi
 
   mkdir -p "$folder_path"
-  mtdSlot=$(grep -w 'U-Config' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
-  mtdSlot_res=$(grep -w 'U-Config_res' /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+')
+  mtdSlot=$(get_mtd_index_by_name "U-Config")
+  mtdSlot_res=$(get_mtd_index_by_name "U-Config_res")
   if [ -n "$mtdSlot" ]; then
     perform_dd "/dev/mtd$mtdSlot" "$folder_path/U-Config.bin"
     if [ $? -eq 0 ]; then
