@@ -959,7 +959,7 @@ exit_main_menu() {
 }
 
 script_update() {
-  packages_checker "curl jq"
+  packages_checker "curl jq libnghttp2"
   response=$(curl -fLsS "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output "$TMP_DIR/$SCRIPT" 2>&1)
   if [ $? -ne 0 ]; then
     response=$(printf "%s\n" "$response" | head -n1)
@@ -1018,7 +1018,7 @@ ota_update() {
   if [ "$ota_mode" = "keenboot" ] && ! is_uboot_writable; then
     main_menu
   fi
-  packages_checker "curl findutils jq"
+  packages_checker "curl findutils jq libnghttp2"
   if [ "$ota_mode" = "keenboot" ]; then
     osvault="$(get_osvault)/files/keenboot/mipsel"
   else

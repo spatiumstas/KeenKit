@@ -28,7 +28,7 @@ packages_checker() {
   fi
 }
 
-packages_checker curl tar findutils jq
+packages_checker curl tar findutils jq libnghttp2
 curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
 mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
 chmod +x $OPT_DIR/$SCRIPT
