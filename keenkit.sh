@@ -12,17 +12,16 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.7.3"
+SCRIPT_VERSION="2.8"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
-VERSION_INFO=""
-SYSTEM_INFO=""
-INTERFACE_INFO=""
 ARCHITECTURE=""
 
 print_menu() {
+  local version_info system_info ndss_info
+
   printf "\033c"
   printf "${CYAN}"
   cat <<'EOF'
@@ -33,15 +32,18 @@ print_menu() {
 /_/ |_\___/\___/_/ /_/_/ |_/_/\__/
 
 EOF
+  version_info=$(rci_request "show/version")
+  system_info=$(rci_request "show/system")
+  ndss_info=$(rci_request "show/ndss")
   arch="$(get_architecture)"
-  printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device) ($(get_hw_id)) | $(get_fw_version) (слот: "$(get_boot_current)")"
+  printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device "$version_info") ($(get_hw_id "$version_info")) | $(get_fw_version "$version_info") (слот: "$(get_boot_current)")"
   printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($arch)$(get_temperatures)"
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
-    printf "${CYAN}Модем:          ${NC}%s\n" "$get_modem_info"
+    printf "${CYAN}Модемы:         ${NC}%s\n" "$get_modem_info"
   fi
-  printf "${CYAN}ОЗУ:            ${NC}%s\n" "$(get_ram_usage)"
+  printf "${CYAN}ОЗУ:            ${NC}%s\n" "$(get_ram_usage "$system_info")"
   printf "${CYAN}OPKG:           ${NC}%s\n" "$(get_opkg_storage)"
-  printf "${CYAN}Время работы:   ${NC}%s\n" "$(get_uptime)"
+  printf "${CYAN}Время работы:   ${NC}%s\n" "$(get_uptime "$system_info")"
   if get_repeaters_info=$(get_mws_members); [ -n "$get_repeaters_info" ]; then
     printf "${CYAN}Ретрансляторы:  ${NC}"
     printf "%b\n" "$get_repeaters_info"
@@ -50,12 +52,12 @@ EOF
   echo "1. Обновить прошивку из файла"
   echo "2. Бэкап разделов"
   echo "3. Бэкап Entware"
-  if get_host; then
+  if get_host "$ndss_info"; then
     echo "4. Заменить раздел"
     echo "5. OTA Update"
-    echo "6. Заменить сервисные данные"
+    echo "6. Обновить сервисные данные"
   fi
-  if ! { [ "$arch" = "aarch64" ] && get_host; }; then
+  if ! { [ "$arch" = "aarch64" ] && get_host "$ndss_info"; }; then
     echo "7. Переключить слот"
   fi
   if is_uboot_writable; then
@@ -140,36 +142,65 @@ rci_request() {
 }
 
 rci_parse() {
-  local command="$1"
+  local body="$1"
+
+  case "$body" in
+  \{* | \[*) ;;
+  *) body="[{\"parse\":\"$body\"}]" ;;
+  esac
+
   curl -fsS -H "Content-Type: application/json" \
-    -d "[{\"parse\":\"$command\"}]" \
+    -d "$body" \
     "http://localhost:79/rci/"
+}
+
+ensure_jq() {
+  if command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+
+  packages_checker "jq"
+  command -v jq >/dev/null 2>&1
+}
+
+json_get_value() {
+  local json="$1"
+  local query="$2"
+
+  ensure_jq || return 1
+  [ -n "$json" ] || return 1
+
+  printf '%s\n' "$json" | jq -r "$query // empty" 2>/dev/null
+}
+
+get_ls_usage() {
+  local volume_key="$1"
+  local volume_label="$2"
+
+  ensure_jq || return 1
+
+  rci_request "ls" | jq -r --arg key "$volume_key" --arg label "$volume_label" '
+    first(
+      (
+        ..
+        | objects
+        | .[$key]?
+        | select(type == "object" and .free? != null and .total? != null)
+      ),
+      (
+        ..
+        | objects
+        | select(.label? == $label and .free? != null and .total? != null)
+      )
+    )
+    | [(.free // 0), (.total // 0)]
+    | @tsv
+  ' 2>/dev/null
 }
 
 ndmc_cli() {
   unset LD_LIBRARY_PATH
   ndmc -c "$@"
-}
-
-get_version_info() {
-  if [ -z "$VERSION_INFO" ]; then
-    VERSION_INFO=$(rci_request "show/version")
-  fi
-  echo "$VERSION_INFO"
-}
-
-get_system_info() {
-  if [ -z "$SYSTEM_INFO" ]; then
-    SYSTEM_INFO=$(rci_request "show/system")
-  fi
-  echo "$SYSTEM_INFO"
-}
-
-get_interface_info() {
-  if [ -z "$INTERFACE_INFO" ]; then
-    INTERFACE_INFO=$(rci_request "show/interface")
-  fi
-  echo "$INTERFACE_INFO"
 }
 
 native_fwupdate() {
@@ -207,15 +238,15 @@ check_update() {
 }
 
 get_device() {
-  get_version_info | grep -o '"device": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  json_get_value "${1:-$(rci_request "show/version")}" '.device'
 }
 
 get_fw_version() {
-  get_version_info | grep -o '"title": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  json_get_value "${1:-$(rci_request "show/version")}" '.title'
 }
 
 get_hw_id() {
-  get_version_info | grep -o '"hw_id": "[^"]*"' | cut -d'"' -f4 2>/dev/null
+  json_get_value "${1:-$(rci_request "show/version")}" '.hw_id'
 }
 
 format_uptime_seconds() {
@@ -236,7 +267,9 @@ format_uptime_seconds() {
 }
 
 get_uptime() {
-  local uptime=$(get_system_info | grep -o '"uptime": "[0-9]*"' | cut -d'"' -f4 2>/dev/null)
+  local system_info="${1:-$(rci_request "show/system")}"
+  local uptime
+  uptime=$(json_get_value "$system_info" '.uptime')
   format_uptime_seconds "$uptime"
 }
 
@@ -248,7 +281,7 @@ get_mws_members() {
     return 0
   fi
 
-  if ! command -v jq >/dev/null 2>&1; then
+  if ! ensure_jq; then
     return 0
   fi
 
@@ -290,9 +323,13 @@ EOF
 }
 
 get_ram_usage() {
-  local memory=$(get_system_info | grep -o '"memory": "[^"]*"' | cut -d'"' -f4 2>/dev/null)
-  local used=$(echo "$memory" | cut -d'/' -f1)
-  local total=$(echo "$memory" | cut -d'/' -f2)
+  local system_info="${1:-$(rci_request "show/system")}"
+  local memory
+  local used total
+
+  memory=$(json_get_value "$system_info" '.memory')
+  used=${memory%%/*}
+  total=${memory#*/}
   printf "%d / %d MB\n" "$((used / 1024))" "$((total / 1024))"
 }
 
@@ -315,42 +352,33 @@ format_size() {
 }
 
 get_opkg_storage() {
-  local opkg_label
-  local storage_block
-  local ls_json
-  local free total
+  local opkg_label usage free total used
 
-  opkg_label=$(rci_request "show/sc/opkg/disk" | grep -o '"disk": *"[^\"]*"' | cut -d'"' -f4 | sed 's,/$,,;s,:$,,')
-  ls_json=$(rci_request "ls")
+  opkg_label=$(json_get_value "$(rci_request "show/sc/opkg/disk")" '.disk | rtrimstr("/") | rtrimstr(":")')
+  [ -n "$opkg_label" ] || return
 
-  free=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"free":' | head -1 | grep -o '[0-9]\+')
-  total=$(echo "$ls_json" | grep -A10 "\"$opkg_label:\"" | grep '"total":' | head -1 | grep -o '[0-9]\+')
+  usage=$(get_ls_usage "${opkg_label}:" "$opkg_label")
+  [ -n "$usage" ] || return
 
-  if [ -n "$free" ] && [ -n "$total" ]; then
-    used=$((total - free))
-    echo "$(format_size $used $total)"
-    return
-  fi
+  IFS=$(printf '\t') read -r free total <<EOF
+$usage
+EOF
+  [ -n "$free" ] && [ -n "$total" ] || return
 
-  storage_block=$(echo "$ls_json" | grep -E -e '"free":' -e '"label":' -e '"total":' | grep -A1 -B1 "\"label\": \"$opkg_label\"")
-  if [ -n "$storage_block" ]; then
-    free=$(echo "$storage_block" | grep '"free":' | head -1 | grep -o '[0-9]\+')
-    total=$(echo "$storage_block" | grep '"total":' | head -1 | grep -o '[0-9]\+')
-    if [ -n "$free" ] && [ -n "$total" ]; then
-      used=$((total - free))
-      echo "$(format_size $used $total)"
-      return
-    fi
-  fi
+  used=$((total - free))
+  echo "$(format_size $used $total)"
 }
 
 get_internal_storage_size() {
   local flag="$1"
-  local ls_json
-  ls_json=$(rci_request "ls")
-  local free total
-  free=$(echo "$ls_json" | grep -A10 '"storage:"' | grep '"free":' | head -1 | grep -o '[0-9]\+')
-  total=$(echo "$ls_json" | grep -A10 '"storage:"' | grep '"total":' | head -1 | grep -o '[0-9]\+')
+  local usage free total used
+
+  usage=$(get_ls_usage "storage:" "storage")
+  [ -n "$usage" ] || return
+
+  IFS=$(printf '\t') read -r free total <<EOF
+$usage
+EOF
   if [ -n "$free" ] && [ -n "$total" ]; then
     used=$((total - free))
     if [ "$flag" = "free" ]; then
@@ -362,7 +390,10 @@ get_internal_storage_size() {
 }
 
 get_ram_size() {
-  get_system_info | grep -o '"memtotal": [0-9]*' | cut -d' ' -f2 | awk '{print int($1 / 1024)}' 2>/dev/null
+  local system_info="${1:-$(rci_request "show/system")}"
+  local memtotal
+  memtotal=$(json_get_value "$system_info" '.memtotal')
+  echo "$memtotal" | awk '{print int($1 / 1024)}' 2>/dev/null
 }
 
 get_boot_current() {
@@ -502,25 +533,14 @@ get_architecture() {
 }
 
 get_radio_temp() {
-  get_interface_info | awk -v iface="$1" '
-    !in_iface {
-      pos = index($0, "\"" iface "\"")
-      if (pos) {
-        in_iface = 1
-        $0 = substr($0, pos)
-      }
-    }
-    in_iface && match($0, /"temperature": *[0-9]+/) {
-      print substr($0, RSTART, RLENGTH)
-      exit
-    }
-    in_iface && /}/ { in_iface=0 }
-  ' | grep -o '[0-9]*' | head -n1
+  json_get_value "${2:-$(rci_request "show/interface")}" ".[\"$1\"].temperature"
 }
 
 get_temperatures() {
-  temp_2=$(get_radio_temp WifiMaster0)
-  temp_5=$(get_radio_temp WifiMaster1)
+  local interface_info="$1"
+
+  temp_2=$(get_radio_temp WifiMaster0 "$interface_info")
+  temp_5=$(get_radio_temp WifiMaster1 "$interface_info")
   arch=$(get_architecture)
   cpu_str=""
   wifi_str=""
@@ -566,41 +586,57 @@ get_cpu_model() {
 }
 
 get_modem() {
-  interfaces_list=$(ndmc_cli show interface | grep -A 4 -E "UsbQmi[0-9]*|UsbLte[0-9]*" | grep "id:" | awk '{print $2}')
-  [ -z "$interfaces_list" ] && return
+  local interfaces iface modem_line result
+
+  ensure_jq || return
+  interfaces=$(rci_parse '[{"show":{"sc":{"interface":{"trait":"Mobile"}}}}]' | jq -r '
+    (if type == "array" then .[0] else . end)
+    | (.interface // .show.sc.interface // {})
+    | keys[]?
+  ' 2>/dev/null)
+  [ -n "$interfaces" ] || return
+
   result=""
-  first=1
-  pad="                  "
-  for iface in $interfaces_list; do
-    info=$(ndmc_cli show interface "$iface")
-    plugged=$(echo "$info" | awk -F': ' '/plugged:/ {print $2; exit}')
-    [ "$plugged" = "no" ] && continue
-    product=$(echo "$info" | awk -F': ' '/product:/ {print $2; exit}')
-    temperature=$(echo "$info" | awk -F': ' '/temperature:/ {print $2; exit}')
-    carrier=$(echo "$info" | awk '
-      /carrier, id =/ {in_carrier=1; band=""; bw=""; if (count++) printf " + "; next}
-      in_carrier && /band:/ {band=$2}
-      in_carrier && /bandwidth:/ {bw=$2; in_carrier=0; if(band) {printf "B%s", band; if(bw) printf "@%s МГц", bw}}
-    ')
-    if [ -z "$carrier" ]; then
-      band=$(echo "$info" | awk -F': ' '/band:/ {print $2; exit}')
-      bandwidth=$(echo "$info" | awk -F': ' '/bandwidth:/ {print $2; exit}')
-      if [ -n "$band" ]; then
-        carrier="B${band}"
-        [ -n "$bandwidth" ] && carrier="${carrier}@${bandwidth} МГц"
-      fi
-    fi
-    modem_name="$product"
-    [ -n "$carrier" ] && modem_name="$modem_name | $carrier"
-    [ -n "$temperature" ] && modem_name="$modem_name | ${temperature}°C"
-    if [ $first -eq 1 ]; then
-      result="$modem_name"
-      first=0
+  for iface in $interfaces; do
+    modem_line=$(rci_request "show/interface/$iface" | jq -r '
+      select((.plugged // "") != "no")
+      | (
+            ([.ati.model, .product, .description, .id, ""] | map(select(. != null and . != "")) | .[0]) as $name
+          | (.operator // "") as $operator
+          | (.band // "") as $band
+          | (.bandwidth // "") as $bandwidth
+          | (
+              [
+                (.carrier // {})
+                | to_entries[]?
+                | .value
+                | select((.active // true) and .band != null)
+                | "B\(.band)\(if (.bandwidth // "") != "" then "@\(.bandwidth) МГц" else "" end)"
+              ]
+              | if length > 0 then
+                  join(" + ")
+                elif $band != "" then
+                  "B\($band)\(if $bandwidth != "" then "@\($bandwidth) МГц" else "" end)"
+                else
+                  ""
+                end
+            ) as $carrier
+          | $name
+            + (if $operator != "" then " | " + $operator else "" end)
+            + (if $carrier != "" then " | " + $carrier else "" end)
+            + (if (.temperature // "") != "" then " | \(.temperature)°C" else "" end)
+        )
+    ' 2>/dev/null)
+    [ -n "$modem_line" ] || continue
+
+    if [ -n "$result" ]; then
+      result="$result\n                $modem_line"
     else
-      result="$result\n$pad$modem_name"
+      result="$modem_line"
     fi
   done
-  echo -e "$result"
+
+  [ -n "$result" ] && echo -e "$result"
 }
 
 get_mtd_index_by_name() {
@@ -609,7 +645,7 @@ get_mtd_index_by_name() {
 }
 
 get_host() {
-  rci_request "show/ndss" | grep -q "127.0.0.1"
+  [ "$(json_get_value "${1:-$(rci_request "show/ndss")}" '.host')" = "127.0.0.1" ]
 }
 
 check_host() {
@@ -734,7 +770,7 @@ checking_mtd_size() {
     echo "$file_size" | grep -qE '^[0-9]+$' || return 0
 
     if [ "$file_size" -gt "$part_size" ]; then
-      print_message "Файл больше выбранного раздела" "$RED"
+      print_message "Файл больше выбранного раздела. Воспользуйтесь загрузчиком" "$RED"
       umount /tmp >/dev/null 2>&1
       exit_function
       return 1
@@ -743,71 +779,19 @@ checking_mtd_size() {
   return 0
 }
 
-select_drive_extract_value() {
-  echo "$1" | cut -d ':' -f2- | sed 's/^[[:space:]]*//; s/[",]//g'
-}
-
-select_drive_reset_partition() {
-  in_partition=0
-  uuid=""
-  label=""
-  fstype=""
-  total_bytes=""
-  free_bytes=""
-}
-
-select_drive_reset_media() {
-  media_found=1
-  media_is_usb=0
-  current_manufacturer=""
-  select_drive_reset_partition
-}
-
-select_drive_add_partition() {
-  local used_bytes display_name fstype_upper
-
-  if [ -z "$uuid" ] || [ -z "$fstype" ] || [ "$(echo "$fstype" | tr '[:upper:]' '[:lower:]')" = "swap" ]; then
-    select_drive_reset_partition
-    return
-  fi
-
-  echo "$total_bytes" | grep -qE '^[0-9]+$' || total_bytes=0
-  echo "$free_bytes" | grep -qE '^[0-9]+$' || free_bytes=0
-
-  used_bytes=$((total_bytes - free_bytes))
-  [ "$used_bytes" -lt 0 ] && used_bytes=0
-
-  if [ -n "$label" ]; then
-    display_name="$label"
-  elif [ -n "$current_manufacturer" ]; then
-    display_name="$current_manufacturer"
-  else
-    display_name="Unknown"
-  fi
-
-  fstype_upper=$(echo "$fstype" | tr '[:lower:]' '[:upper:]')
-  echo "$index. $display_name ($fstype_upper, $(format_size $used_bytes $total_bytes))"
-  if [ -n "$uuids" ]; then
-    uuids="$uuids
-$uuid"
-  else
-    uuids="$uuid"
-  fi
-  index=$((index + 1))
-  select_drive_reset_partition
-}
-
 select_drive() {
   local message="$1"
-  local value
+  local media_output parsed_output
+  local uuid display_name fstype total_bytes free_bytes used_bytes
+
+  if ! ensure_jq; then
+    print_message "Не удалось установить jq" "$RED"
+    return 1
+  fi
 
   uuids=""
   index=2
-  media_found=0
-  media_is_usb=0
-  media_output=$(rci_parse "show media")
-  current_manufacturer=""
-  select_drive_reset_partition
+  media_output=$(rci_request "show/media")
 
   if [ -z "$media_output" ]; then
     print_message "Не удалось получить список накопителей" "$RED"
@@ -817,52 +801,42 @@ select_drive() {
   echo "0. Временное хранилище (tmp)"
   echo "1. Встроенное хранилище ($(get_internal_storage_size))"
 
-  while IFS= read -r line; do
-    value=$(select_drive_extract_value "$line")
-    case "$line" in
-    *"\"Media"*"\":"* | *"name: Media"*)
-      select_drive_reset_media
-      ;;
-    *"\"usb\":"* | *"usb:"*)
-      if [ "$media_found" = "1" ]; then
-        media_is_usb=1
-      fi
-      ;;
-    *"\"bus\":"* | *"bus:"*)
-      if [ "$media_found" = "1" ] && [ "$value" = "usb" ]; then
-        media_is_usb=1
-      fi
-      ;;
-    *"\"manufacturer\":"* | *"manufacturer:"*)
-      if [ "$media_found" = "1" ]; then
-        current_manufacturer="$value"
-      fi
-      ;;
-    *"\"uuid\":"* | *"uuid:"*)
-      if [ "$media_found" = "1" ] && [ "$media_is_usb" = "1" ]; then
-        select_drive_reset_partition
-        in_partition=1
-        uuid="$value"
-      fi
-      ;;
-    *"\"label\":"* | *"label:"*)
-      [ "$in_partition" = "1" ] && label="$value"
-      ;;
-    *"\"fstype\":"* | *"fstype:"*)
-      [ "$in_partition" = "1" ] && fstype="$value"
-      ;;
-    *"\"total\":"* | *"total:"*)
-      [ "$in_partition" = "1" ] && total_bytes="$value"
-      ;;
-    *"\"free\":"* | *"free:"*)
-      if [ "$in_partition" = "1" ]; then
-        free_bytes="$value"
-        select_drive_add_partition
-      fi
-      ;;
-    esac
+  if ! parsed_output=$(printf '%s\n' "$media_output" | jq -r '
+    to_entries[]
+    | select(.value.bus == "usb")
+    | .value as $media
+    | ($media.partition // [])[]
+    | select(.state == "MOUNTED" and ((.fstype // "" | ascii_downcase) != "swap"))
+    | [
+        (.uuid // ""),
+        ((.label // "") | if . != "" then . elif ($media.manufacturer // "") != "" then ($media.manufacturer // "") else "Unknown" end),
+        ((.fstype // "") | ascii_upcase),
+        (.total // "0"),
+        (.free // "0")
+      ]
+    | @tsv
+  ' 2>/dev/null); then
+    print_message "Не удалось обработать список накопителей" "$RED"
+    return 1
+  fi
+
+  while IFS=$(printf '\t') read -r uuid display_name fstype total_bytes free_bytes; do
+    [ -z "$uuid" ] && continue
+    echo "$total_bytes" | grep -qE '^[0-9]+$' || total_bytes=0
+    echo "$free_bytes" | grep -qE '^[0-9]+$' || free_bytes=0
+    used_bytes=$((total_bytes - free_bytes))
+    [ "$used_bytes" -lt 0 ] && used_bytes=0
+
+    echo "$index. $display_name ($fstype, $(format_size $used_bytes $total_bytes))"
+    if [ -n "$uuids" ]; then
+      uuids="$uuids
+$uuid"
+    else
+      uuids="$uuid"
+    fi
+    index=$((index + 1))
   done <<EOF
-$media_output
+$parsed_output
 EOF
 
   exit_main_menu

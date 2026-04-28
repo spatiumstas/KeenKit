@@ -37,7 +37,7 @@ jobs:
         run: |
           sed -i 's/Модель:         /Model:     /g' keenkit.sh
           sed -i 's/Процессор:      /CPU:       /g' keenkit.sh
-          sed -i 's/Модем:          /Modem:     /g' keenkit.sh
+          sed -i 's/Модемы:         /Modems:    /g' keenkit.sh
           sed -i 's/ОЗУ:            /RAM:       /g' keenkit.sh
           sed -i 's/OPKG:           /OPKG:      /g' keenkit.sh          
           sed -i 's/Время работы:   /Uptime:    /g' keenkit.sh
