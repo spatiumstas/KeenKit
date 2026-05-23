@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8"
+SCRIPT_VERSION="2.8.1"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -37,7 +37,10 @@ EOF
   ndss_info=$(rci_request "show/ndss")
   arch="$(get_architecture)"
   printf "${CYAN}Модель:         ${NC}%s\n" "$(get_device "$version_info") ($(get_hw_id "$version_info")) | $(get_fw_version "$version_info") (слот: "$(get_boot_current)")"
-  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model) ($arch)$(get_temperatures)"
+  printf "${CYAN}Процессор:      ${NC}%s\n" "$(get_cpu_model)($arch)$(get_temperatures)"
+  if get_bootloader_info=$(get_bootloader_version); [ -n "$get_bootloader_info" ]; then
+    printf "${CYAN}Загрузчик:      ${NC}%s\n" "$get_bootloader_info"
+  fi
   if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
     printf "${CYAN}Модемы:         ${NC}%s\n" "$get_modem_info"
   fi
@@ -408,6 +411,21 @@ is_uboot_writable() {
   fi
 }
 
+get_bootloader_version() {
+    local device strings pattern found
+    device=/dev/$(awk -F: '/"U-Boot"/{print $1;exit}' /proc/mtd) || return
+    strings=$(strings "$device" 2>/dev/null)
+    for pattern in '^KeenBOOT ' 'U-Boot v' 'U-Boot '; do
+        found=$(echo "$strings" | grep -m1 "$pattern")
+        [ -n "$found" ] && {
+            [ "$pattern" = '^KeenBOOT ' ] &&
+                echo "$found" ||
+                echo "$found" | sed 's/^.*U-Boot/U-Boot/'
+            return
+        }
+    done
+}
+
 copy_dual_config() {
   local current_slot="$1"
   local new_slot="$2"
@@ -578,11 +596,10 @@ get_cpu_model() {
   for pattern in $cpu_list; do
     found=$(strings /lib/libndmMwsController.so 2>/dev/null | grep -oE "$pattern" | head -n 1)
     if [ -n "$found" ]; then
-      echo "$found"
+      echo "$found "
       return
     fi
   done
-  echo "Unknown"
 }
 
 get_modem() {
@@ -656,12 +673,13 @@ check_host() {
 
 spinner_start() {
   SPINNER_MSG="$1"
-  local spin='|/-\\' i=0
-  echo -n "[ ] $SPINNER_MSG"
   (
+    i=0
     while :; do
-      i=$(((i + 1) % 4))
-      printf "\r[%s] %s" "${spin:$i:1}" "$SPINNER_MSG"
+      set -- "⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"
+      eval "spin=\${$((i % 10 + 1))}"
+      printf "\r\033[0m[%s] %s\033[0m" "$spin" "$SPINNER_MSG"
+      i=$((i + 1))
       usleep 100000
     done
   ) &

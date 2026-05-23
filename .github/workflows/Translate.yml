@@ -35,14 +35,15 @@ jobs:
 
       - name: Run translation
         run: |
-          sed -i 's/Модель:         /Model:     /g' keenkit.sh
-          sed -i 's/Процессор:      /CPU:       /g' keenkit.sh
-          sed -i 's/Модемы:         /Modems:    /g' keenkit.sh
-          sed -i 's/ОЗУ:            /RAM:       /g' keenkit.sh
-          sed -i 's/OPKG:           /OPKG:      /g' keenkit.sh          
-          sed -i 's/Время работы:   /Uptime:    /g' keenkit.sh
-          sed -i 's/Ретрансляторы:  /Repeaters: /g' keenkit.sh
-          sed -i 's/Версия:         /Version:   /g' keenkit.sh
+          sed -i 's/Модель:         /Model:      /g' keenkit.sh
+          sed -i 's/Процессор:      /CPU:        /g' keenkit.sh
+          sed -i 's/Загрузчик:      /Bootloader: /g' keenkit.sh
+          sed -i 's/Модемы:         /Modems:     /g' keenkit.sh
+          sed -i 's/ОЗУ:            /RAM:        /g' keenkit.sh
+          sed -i 's/OPKG:           /OPKG:       /g' keenkit.sh          
+          sed -i 's/Время работы:   /Uptime:     /g' keenkit.sh
+          sed -i 's/Ретрансляторы:  /Repeaters:  /g' keenkit.sh
+          sed -i 's/Версия:         /Version:    /g' keenkit.sh
           python .github/scripts/translate.py keenkit.sh install.sh README.md
           sed -i 's/Change language/Сменить язык/g' keenkit.sh
           sed -i 's/BRANCH="main"/BRANCH="main-english"/g' keenkit.sh install.sh
