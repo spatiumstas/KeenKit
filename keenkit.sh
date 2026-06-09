@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.1"
+SCRIPT_VERSION="2.8.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -284,10 +284,7 @@ get_mws_members() {
     return 0
   fi
 
-  if ! ensure_jq; then
-    return 0
-  fi
-
+  ensure_jq || return 0
   local repeater_data
   repeater_data=$(echo "$mws_json" | jq -r '
     .[] |
@@ -605,7 +602,7 @@ get_cpu_model() {
 get_modem() {
   local interfaces iface modem_line result
 
-  ensure_jq || return
+  ensure_jq || return 0
   interfaces=$(rci_parse '[{"show":{"sc":{"interface":{"trait":"Mobile"}}}}]' | jq -r '
     (if type == "array" then .[0] else . end)
     | (.interface // .show.sc.interface // {})
@@ -951,24 +948,33 @@ exit_main_menu() {
 }
 
 script_update() {
-  packages_checker "curl jq libcurl"
-  response=$(curl -fLsS "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output "$TMP_DIR/$SCRIPT" 2>&1)
-  if [ $? -ne 0 ]; then
+  packages_checker "curl libcurl"
+
+  UPDATE_URLS="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT
+  $(get_osvault)/scripts/keenkit.sh"
+
+  update_success=0
+  for url in $UPDATE_URLS; do
+    response=$(curl -fLsS --connect-timeout 5 --max-time 10 "$url" --output "$TMP_DIR/$SCRIPT" 2>&1)
+    if [ $? -eq 0 ] && [ -f "$TMP_DIR/$SCRIPT" ] && [ -s "$TMP_DIR/$SCRIPT" ]; then
+      update_success=1
+      break
+    fi
     response=$(printf "%s\n" "$response" | head -n1)
-    print_message "Ошибка $response при обновлении скрипта" "$RED"
+    print_message "Ошибка: $response" "$RED"
+    rm -f "$TMP_DIR/$SCRIPT"
+  done
+
+  if [ "$update_success" -eq 0 ]; then
+    print_message "Не удалось загрузить обновление" "$RED"
     exit_function
   fi
 
-  if [ -f "$TMP_DIR/$SCRIPT" ]; then
-    mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
-    chmod +x "$OPT_DIR/$SCRIPT"
-    print_message "Скрипт успешно обновлён" "$GREEN"
-    sleep 1
-    exec "$OPT_DIR/$SCRIPT"
-  else
-    print_message "Скрипт не был загружен" "$RED"
-    exit_function
-  fi
+  mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
+  chmod +x "$OPT_DIR/$SCRIPT"
+  print_message "Скрипт успешно обновлён" "$GREEN"
+  sleep 1
+  exec "$OPT_DIR/$SCRIPT"
 }
 
 mountFS() {
@@ -1010,7 +1016,7 @@ ota_update() {
   if [ "$ota_mode" = "keenboot" ] && ! is_uboot_writable; then
     main_menu
   fi
-  packages_checker "curl findutils jq libcurl"
+  packages_checker "curl findutils libcurl"
   if [ "$ota_mode" = "keenboot" ]; then
     osvault="$(get_osvault)/files/keenboot/mipsel"
   else
