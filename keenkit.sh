@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8"
+SCRIPT_VERSION="2.8.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -36,19 +36,22 @@ EOF
   system_info=$(rci_request "show/system")
   ndss_info=$(rci_request "show/ndss")
   arch="$(get_architecture)"
-  printf "${CYAN}Model:     ${NC}%s\n" "$(get_device "$version_info") ($(get_hw_id "$version_info")) | $(get_fw_version "$version_info") (slot: "$(get_boot_current)")"
-  printf "${CYAN}CPU:       ${NC}%s\n" "$(get_cpu_model) ($arch)$(get_temperatures)"
-  if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
-    printf "${CYAN}Modems:    ${NC}%s\n" "$get_modem_info"
+  printf "${CYAN}Model:      ${NC}%s\n" "$(get_device "$version_info") ($(get_hw_id "$version_info")) | $(get_fw_version "$version_info") (slot: "$(get_boot_current)")"
+  printf "${CYAN}CPU:        ${NC}%s\n" "$(get_cpu_model)($arch)$(get_temperatures)"
+  if get_bootloader_info=$(get_bootloader_version); [ -n "$get_bootloader_info" ]; then
+    printf "${CYAN}Bootloader: ${NC}%s\n" "$get_bootloader_info"
   fi
-  printf "${CYAN}RAM:       ${NC}%s\n" "$(get_ram_usage "$system_info")"
-  printf "${CYAN}OPKG:      ${NC}%s\n" "$(get_opkg_storage)"
-  printf "${CYAN}Uptime:    ${NC}%s\n" "$(get_uptime "$system_info")"
+  if get_modem_info=$(get_modem); [ -n "$get_modem_info" ]; then
+    printf "${CYAN}Modems:     ${NC}%s\n" "$get_modem_info"
+  fi
+  printf "${CYAN}RAM:        ${NC}%s\n" "$(get_ram_usage "$system_info")"
+  printf "${CYAN}OPKG:       ${NC}%s\n" "$(get_opkg_storage)"
+  printf "${CYAN}Uptime:     ${NC}%s\n" "$(get_uptime "$system_info")"
   if get_repeaters_info=$(get_mws_members); [ -n "$get_repeaters_info" ]; then
-    printf "${CYAN}Repeaters: ${NC}"
+    printf "${CYAN}Repeaters:  ${NC}"
     printf "%b\n" "$get_repeaters_info"
   fi
-  printf "${CYAN}Version:   ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}$(check_update)"
+  printf "${CYAN}Version:    ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}$(check_update)"
   echo "1. Update Firmware from File"
   echo "2. Backup sections"
   echo "3. Backup  Entware"
@@ -281,10 +284,7 @@ get_mws_members() {
     return 0
   fi
 
-  if ! ensure_jq; then
-    return 0
-  fi
-
+  ensure_jq || return 0
   local repeater_data
   repeater_data=$(echo "$mws_json" | jq -r '
     .[] |
@@ -406,6 +406,21 @@ is_uboot_writable() {
   else
     return 1
   fi
+}
+
+get_bootloader_version() {
+    local device strings pattern found
+    device=/dev/$(awk -F: '/"U-Boot"/{print $1;exit}' /proc/mtd) || return
+    strings=$(strings "$device" 2>/dev/null)
+    for pattern in '^KeenBOOT ' 'U-Boot v' 'U-Boot '; do
+        found=$(echo "$strings" | grep -m1 "$pattern")
+        [ -n "$found" ] && {
+            [ "$pattern" = '^KeenBOOT ' ] &&
+                echo "$found" ||
+                echo "$found" | sed 's/^.*U-Boot/U-Boot/'
+            return
+        }
+    done
 }
 
 copy_dual_config() {
@@ -578,17 +593,16 @@ get_cpu_model() {
   for pattern in $cpu_list; do
     found=$(strings /lib/libndmMwsController.so 2>/dev/null | grep -oE "$pattern" | head -n 1)
     if [ -n "$found" ]; then
-      echo "$found"
+      echo "$found "
       return
     fi
   done
-  echo "Unknown"
 }
 
 get_modem() {
   local interfaces iface modem_line result
 
-  ensure_jq || return
+  ensure_jq || return 0
   interfaces=$(rci_parse '[{"show":{"sc":{"interface":{"trait":"Mobile"}}}}]' | jq -r '
     (if type == "array" then .[0] else . end)
     | (.interface // .show.sc.interface // {})
@@ -656,12 +670,13 @@ check_host() {
 
 spinner_start() {
   SPINNER_MSG="$1"
-  local spin='|/-\\' i=0
-  echo -n "[ ] $SPINNER_MSG"
   (
+    i=0
     while :; do
-      i=$(((i + 1) % 4))
-      printf "\r[%s] %s" "${spin:$i:1}" "$SPINNER_MSG"
+      set -- "⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"
+      eval "spin=\${$((i % 10 + 1))}"
+      printf "\r\033[0m[%s] %s\033[0m" "$spin" "$SPINNER_MSG"
+      i=$((i + 1))
       usleep 100000
     done
   ) &
@@ -933,24 +948,33 @@ exit_main_menu() {
 }
 
 script_update() {
-  packages_checker "curl jq libcurl"
-  response=$(curl -fLsS "https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT" --output "$TMP_DIR/$SCRIPT" 2>&1)
-  if [ $? -ne 0 ]; then
+  packages_checker "curl libcurl"
+
+  UPDATE_URLS="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT
+  $(get_osvault)/scripts/keenkit.sh"
+
+  update_success=0
+  for url in $UPDATE_URLS; do
+    response=$(curl -fLsS "$url" --output "$TMP_DIR/$SCRIPT" 2>&1)
+    if [ $? -eq 0 ] && [ -f "$TMP_DIR/$SCRIPT" ] && [ -s "$TMP_DIR/$SCRIPT" ]; then
+      update_success=1
+      break
+    fi
     response=$(printf "%s\n" "$response" | head -n1)
-    print_message "Error $response when updating the script" "$RED"
+    print_message "Error: $response" "$RED"
+    rm -f "$TMP_DIR/$SCRIPT"
+  done
+
+  if [ "$update_success" -eq 0 ]; then
+    print_message "Failed to download update" "$RED"
     exit_function
   fi
 
-  if [ -f "$TMP_DIR/$SCRIPT" ]; then
-    mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
-    chmod +x "$OPT_DIR/$SCRIPT"
-    print_message "Script updated successfully" "$GREEN"
-    sleep 1
-    exec "$OPT_DIR/$SCRIPT"
-  else
-    print_message "Script was not loaded" "$RED"
-    exit_function
-  fi
+  mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
+  chmod +x "$OPT_DIR/$SCRIPT"
+  print_message "Script updated successfully" "$GREEN"
+  sleep 1
+  exec "$OPT_DIR/$SCRIPT"
 }
 
 mountFS() {
@@ -992,7 +1016,7 @@ ota_update() {
   if [ "$ota_mode" = "keenboot" ] && ! is_uboot_writable; then
     main_menu
   fi
-  packages_checker "curl findutils jq libcurl"
+  packages_checker "curl findutils libcurl"
   if [ "$ota_mode" = "keenboot" ]; then
     osvault="$(get_osvault)/files/keenboot/mipsel"
   else
@@ -1102,7 +1126,7 @@ ota_update() {
       exit_function
     fi
     if [ "$ota_mode" = "keenboot" ]; then
-      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may cause the device to malfunction!" "$RED"
+      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
     fi
     printf "${GREEN}MD5 hash matches${NC}\n\n"
     read -p "$(printf "Hired! ${GREEN}$FILE${NC} to update, that's right? (y/n) ")" CONFIRM
@@ -1479,7 +1503,7 @@ rewrite_block() {
 
   for part in $choice; do
     if [ "$part" = "0" ]; then
-      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may cause the device to malfunction!" "$RED"
+      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
     fi
 
     if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
