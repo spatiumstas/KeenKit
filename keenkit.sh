@@ -955,7 +955,7 @@ script_update() {
 
   update_success=0
   for url in $UPDATE_URLS; do
-    response=$(curl -fLsS "$url" --output "$TMP_DIR/$SCRIPT" 2>&1)
+    response=$(curl -fLsS --connect-timeout 5 --max-time 10 "$url" --output "$TMP_DIR/$SCRIPT" 2>&1)
     if [ $? -eq 0 ] && [ -f "$TMP_DIR/$SCRIPT" ] && [ -s "$TMP_DIR/$SCRIPT" ]; then
       update_success=1
       break
