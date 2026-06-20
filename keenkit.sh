@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.2"
+SCRIPT_VERSION="2.8.3"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -209,7 +209,6 @@ ndmc_cli() {
 native_fwupdate() {
   local firmware="$1"
   local firmware_rci_path response
-  local device_uuid
 
   case "$firmware" in
   "$STORAGE_DIR"/*)
@@ -217,10 +216,6 @@ native_fwupdate() {
     ;;
   "$TMP_DIR"/*)
     firmware_rci_path="temp:/${firmware#"$TMP_DIR"/}"
-    ;;
-  /tmp/mnt/*/*)
-    device_uuid=$(echo "$firmware" | awk -F'/' '{print $4}')
-    firmware_rci_path="$device_uuid:/${firmware#"/tmp/mnt/$device_uuid"/}"
     ;;
   *)
     return 1
@@ -1156,6 +1151,10 @@ ota_update() {
         exit 0
       fi
       if [ "$update_rc" -ne 2 ]; then
+        if [ "$update_rc" -ne 0 ]; then
+          print_message "Обновление завершилось с ошибкой, слот не переключён" "$RED"
+          exit_function
+        fi
         if [ "$ota_mode" = "keenboot" ]; then
           print_message "Загрузчик успешно обновлён" "$GREEN"
           exit_function
@@ -1174,7 +1173,6 @@ ota_update() {
 update_firmware_legacy() {
   local firmware="$1"
   local use_mount="$2"
-  backup_config
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
     mountFS
   fi
@@ -1203,7 +1201,6 @@ update_firmware_dual() {
   local fw_slot1 fw_slot2
   local target_fw_slot
 
-  backup_config
   current_slot="$(get_boot_current)"
   if ! echo "$current_slot" | grep -qE '^[12]$'; then
     print_message "Не удалось определить текущий слот: $current_slot. Использую стандартный режим обновления." "$RED"
@@ -1247,8 +1244,6 @@ update_firmware_block() {
   local firmware="$1"
   local use_mount="$2"
   local arch
-  local updater
-  local rc1
   arch="$(get_architecture)"
 
   if [ "$arch" = "aarch64" ]; then
@@ -1265,12 +1260,12 @@ update_firmware_block() {
     fi
   fi
 
-  if [ "$arch" = "aarch64" ] && get_host; then
-    updater="update_firmware_legacy"
+  backup_config
+  if get_ndm_storage; then
+    update_firmware_legacy "$firmware" "$use_mount"
   else
-    updater="update_firmware_dual"
+    update_firmware_dual "$firmware" "$use_mount"
   fi
-  $updater "$firmware" "$use_mount"
 }
 
 find_files() {
@@ -1304,9 +1299,7 @@ firmware_manual_update() {
     selected_drive="$STORAGE_DIR"
     use_mount=true
   else
-    output=$(mount)
     select_drive "Выберите накопитель с размещённым файлом обновления:"
-    selected_drive="$selected_drive"
     use_mount=false
   fi
 
@@ -1342,6 +1335,10 @@ firmware_manual_update() {
     if [ "$update_rc" -eq 2 ]; then
       exit 0
     fi
+    if [ "$update_rc" -ne 0 ]; then
+      print_message "Обновление завершилось с ошибкой, слот не переключён" "$RED"
+      exit_function
+    fi
     print_message "Прошивка успешно обновлена" "$GREEN"
     printf "${NC}"
     read -p "Удалить файл обновления? (y/n) " item_rc2
@@ -1365,7 +1362,6 @@ firmware_manual_update() {
 }
 
 backup_block() {
-  output=$(mount)
   select_drive "Выберите накопитель для бэкапа:"
   mtd_output=$(cat /proc/mtd)
   printf "\n${GREEN}Доступные разделы:${NC}\n"
@@ -1442,7 +1438,6 @@ backup_block() {
 
 backup_entware() {
   packages_checker "tar libacl"
-  output=$(mount)
   select_drive "Выберите накопитель:"
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
   spinner_start "Выполняю копирование"
@@ -1463,7 +1458,6 @@ backup_entware() {
 
 rewrite_block() {
   check_host
-  output=$(mount)
   select_drive "Выберите накопитель с размещённым файлом:"
   files=$(find_files "$selected_drive" "60k")
   count=$(echo "$files" | wc -l)
