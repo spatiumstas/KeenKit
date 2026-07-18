@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.3"
+SCRIPT_VERSION="2.8.4"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -141,7 +141,7 @@ EOF
 
 rci_request() {
   local endpoint="$1"
-  curl -s "http://localhost:79/rci/$endpoint"
+  curl -s "http://127.0.0.1:79/rci/$endpoint"
 }
 
 rci_parse() {
@@ -154,7 +154,7 @@ rci_parse() {
 
   curl -fsS -H "Content-Type: application/json" \
     -d "$body" \
-    "http://localhost:79/rci/"
+    "http://127.0.0.1:79/rci/"
 }
 
 ensure_jq() {
