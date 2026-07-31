@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.4"
+SCRIPT_VERSION="2.8.5"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -63,7 +63,7 @@ EOF
   if ! { [ "$arch" = "aarch64" ] && get_host "$ndss_info"; }; then
     echo "7. Switch Slot"
   fi
-  if is_uboot_writable; then
+  if get_host "$ndss_info" && { [ "$arch" != "mipsel" ] || is_uboot_writable; }; then
     echo "8. KeenBOOT OTA Update"
   fi
   printf "\n77. Сменить язык"
@@ -396,11 +396,11 @@ get_boot_current() {
 }
 
 is_uboot_writable() {
-  if [ "$(cat /sys/class/mtd/mtd0/flags 2>/dev/null)" = "0x400" ]; then
-    return 0
-  else
-    return 1
-  fi
+  local uboot_index flags
+  uboot_index=$(get_mtd_index_by_name "U-Boot") || return 1
+  [ -n "$uboot_index" ] || return 1
+  flags=$(cat "/sys/class/mtd/mtd$uboot_index/flags" 2>/dev/null) || return 1
+  [ "$flags" = "0x400" ]
 }
 
 get_bootloader_version() {
@@ -498,11 +498,6 @@ switch_boot_slot() {
   esac
 
   print_message "Switching the slot $current_slot on $new_slot" "$CYAN"
-
-  if ! copy_dual_config "$current_slot" "$new_slot"; then
-    print_message "Error copying configuration, slot will not be switched." "$RED"
-    exit_function
-  fi
 
   if change_boot_slot; then
     print_message "Slot successfully switched to $new_slot. A reboot is required to apply." "$GREEN"
@@ -987,6 +982,25 @@ get_osvault() {
   echo "b3N2YXVsdC5rZWVuZXRpY3BvcnRlZC5kZXY=" | base64 -d
 }
 
+uboot_write_aarch64() {
+  local base="$1" image="$2" module="$TMP_DIR/mtd_rw_all.ko" writer="$TMP_DIR/keenboot_writer" rc
+
+  for file in mtd_rw_all.ko keenboot_writer; do
+    if ! curl -fLsS "$base/$file" --output "$TMP_DIR/$file" || [ ! -s "$TMP_DIR/$file" ]; then
+      print_message "Failed to Upload $file" "$RED"
+      rm -f "$module" "$writer"
+      return 1
+    fi
+  done
+  chmod 700 "$writer" || return 1
+  grep -q '^mtd2_unlock ' /proc/modules && rmmod mtd2_unlock 2>/dev/null || true
+  grep -q '^mtd_rw_all ' /proc/modules || insmod "$module" || return 1
+  "$writer" WRITE "$image"
+  rc=$?
+  rm -f "$module" "$writer"
+  return "$rc"
+}
+
 show_progress() {
   local total_size="$1"
   local downloaded=0
@@ -1007,13 +1021,12 @@ show_progress() {
 
 ota_update() {
   check_host
-  local ota_mode="${1:-firmware}"
-  if [ "$ota_mode" = "keenboot" ] && ! is_uboot_writable; then
-    main_menu
-  fi
+  local ota_mode="${1:-firmware}" arch
   packages_checker "curl findutils libcurl"
   if [ "$ota_mode" = "keenboot" ]; then
-    osvault="$(get_osvault)/files/keenboot/mipsel"
+    arch=$(get_architecture)
+    [ "$arch" != "mipsel" ] || is_uboot_writable || return 1
+    osvault="$(get_osvault)/files/keenboot/$arch"
   else
     osvault="$(get_osvault)/osvault"
   fi
@@ -1111,7 +1124,6 @@ ota_update() {
     curl -fLsS "$osvault/$DIR_ENCODED/md5sum" --output "$DOWNLOAD_PATH/md5sum"
     MD5SUM_REMOTE=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     MD5SUM_LOCAL=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
-
     if [ "$MD5SUM_REMOTE" != "$MD5SUM_LOCAL" ]; then
       printf "${RED}MD5 Hash does not match..${NC}\n"
       echo "Pending: $MD5SUM_REMOTE"
@@ -1121,16 +1133,20 @@ ota_update() {
       exit_function
     fi
     if [ "$ota_mode" = "keenboot" ]; then
-      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
+      print_message "Warning: Upgrading the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
     fi
     printf "${GREEN}MD5 hash matches${NC}\n\n"
     read -p "$(printf "Hired! ${GREEN}$FILE${NC} to update, that's right? (y/n) ")" CONFIRM
     case "$CONFIRM" in
     y | Y)
       if [ "$ota_mode" = "keenboot" ]; then
-        ubootSlot=$(get_mtd_index_by_name "U-Boot")
-        perform_dd "$DOWNLOAD_PATH/$FILE" "/dev/mtdblock$ubootSlot"
-        update_rc=0
+        if [ "$arch" = "aarch64" ]; then
+          uboot_write_aarch64 "$(get_osvault)/files/keenboot/modules" "$DOWNLOAD_PATH/$FILE"
+        else
+          ubootSlot=$(get_mtd_index_by_name "U-Boot")
+          perform_dd "$DOWNLOAD_PATH/$FILE" "/dev/mtdblock$ubootSlot"
+        fi
+        update_rc=$?
       else
         update_firmware_block "$DOWNLOAD_PATH/$FILE" "$use_mount"
         update_rc=$?
