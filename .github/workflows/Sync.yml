@@ -1,0 +1,46 @@
+name: Sync
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check syntax
+        run: sh -n keenkit.sh
+
+      - name: Upload
+        env:
+          URL: ${{ secrets.URL }}
+          TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          set -eu
+
+          file_size=$(wc -c < keenkit.sh)
+
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --url "${URL}" \
+            --header "Authorization: Bearer ${TOKEN}" \
+            --header "Content-Type: application/octet-stream" \
+            --header "X-File-Chunk-Offset: 0" \
+            --header "X-File-Total-Size: ${file_size}" \
+            --header "X-File-Upload-Session: ${GITHUB_SHA}" \
+            --data-binary @keenkit.sh

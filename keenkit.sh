@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.5"
+SCRIPT_VERSION="2.8.6"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -230,7 +230,9 @@ native_fwupdate() {
 }
 
 check_update() {
-  REMOTE_VERSION=$(curl -s --max-time 1 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
+  local response
+  response=$(curl -s --max-time 1 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest")
+  REMOTE_VERSION=$(json_get_value "$response" '.tag_name')
   [ -z "$REMOTE_VERSION" ] && return
   [ "$REMOTE_VERSION" != "$SCRIPT_VERSION" ] && printf " | ${GREEN}Доступно $REMOTE_VERSION${NC}"
 }
@@ -403,16 +405,54 @@ is_uboot_writable() {
   [ "$flags" = "0x400" ]
 }
 
-get_bootloader_version() {
-    local device strings pattern found
-    device=/dev/$(awk -F: '/"U-Boot"/{print $1;exit}' /proc/mtd) || return
-    strings=$(strings "$device" 2>/dev/null)
+parse_bootloader_version() {
+    local strings="$1" pattern found
+    found=$(echo "$strings" | grep -m1 '^Version: (KB-')
+    [ -n "$found" ] && {
+        echo "KeenBOOT $(echo "$found" | sed -e 's/^Version: (//' -e 's/)$//')"
+        return
+    }
     for pattern in '^KeenBOOT ' 'U-Boot v' 'U-Boot '; do
         found=$(echo "$strings" | grep -m1 "$pattern")
         [ -n "$found" ] && {
             [ "$pattern" = '^KeenBOOT ' ] &&
                 echo "$found" ||
                 echo "$found" | sed 's/^.*U-Boot/U-Boot/'
+            return
+        }
+    done
+}
+
+get_xz_decompressor() {
+    local cmd
+    for cmd in xzcat unxz xz; do
+        command -v "$cmd" >/dev/null 2>&1 || continue
+        case "$cmd" in
+        xzcat) echo "xzcat" ;;
+        unxz) echo "unxz -c" ;;
+        xz) echo "xz -dc" ;;
+        esac
+        return 0
+    done
+    return 1
+}
+
+get_bootloader_version() {
+    local device version offset decompressor
+    device=/dev/$(awk -F: '/"U-Boot"/{print $1;exit}' /proc/mtd) || return
+    version=$(parse_bootloader_version "$(strings "$device" 2>/dev/null)")
+    [ -n "$version" ] && {
+        echo "$version"
+        return
+    }
+
+    decompressor=$(get_xz_decompressor) || return
+    for offset in $(strings -t d "$device" 2>/dev/null | awk '$2 == "7zXZ" { print $1 - 1 }'); do
+        [ "$offset" -gt 0 ] 2>/dev/null || continue
+        version=$(parse_bootloader_version "$(dd if="$device" bs="$offset" skip=1 2>/dev/null |
+            $decompressor 2>/dev/null | strings)")
+        [ -n "$version" ] && {
+            echo "$version"
             return
         }
     done
