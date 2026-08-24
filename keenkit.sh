@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.5"
+SCRIPT_VERSION="2.8.6"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -446,8 +446,6 @@ get_bootloader_version() {
         return
     }
 
-    # aarch64 KeenBOOT lives inside a container with an XZ-compressed payload,
-    # so plain strings(1) over the partition never sees the banner.
     decompressor=$(get_xz_decompressor) || return
     for offset in $(strings -t d "$device" 2>/dev/null | awk '$2 == "7zXZ" { print $1 - 1 }'); do
         [ "$offset" -gt 0 ] 2>/dev/null || continue
