@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.6"
+SCRIPT_VERSION="2.8.7"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -1026,17 +1026,19 @@ uboot_write_aarch64() {
   local base="$1" image="$2" module="$TMP_DIR/mtd_rw_all.ko" writer="$TMP_DIR/keenboot_writer" rc
 
   for file in mtd_rw_all.ko keenboot_writer; do
-    if ! curl -fLsS "$base/$file" --output "$TMP_DIR/$file" || [ ! -s "$TMP_DIR/$file" ]; then
+    if ! curl -fLsS "$base/$file" -o "$TMP_DIR/$file" || [ ! -s "$TMP_DIR/$file" ]; then
       print_message "Не удалось загрузить $file" "$RED"
       rm -f "$module" "$writer"
       return 1
     fi
   done
-  chmod 700 "$writer" || return 1
-  grep -q '^mtd2_unlock ' /proc/modules && rmmod mtd2_unlock 2>/dev/null || true
-  grep -q '^mtd_rw_all ' /proc/modules || insmod "$module" || return 1
+  chmod +x "$writer" || return 1
+  rmmod mtd2_unlock 2>/dev/null || true
+  rmmod mtd_rw_all 2>/dev/null || true
+  insmod "$module" || return 1
   "$writer" WRITE "$image"
   rc=$?
+  rmmod mtd_rw_all 2>/dev/null || true
   rm -f "$module" "$writer"
   return "$rc"
 }
@@ -1208,7 +1210,7 @@ ota_update() {
       fi
       if [ "$update_rc" -ne 2 ]; then
         if [ "$update_rc" -ne 0 ]; then
-          print_message "Обновление завершилось с ошибкой, слот не переключён" "$RED"
+          print_message "Обновление завершилось с ошибкой" "$RED"
           exit_function
         fi
         if [ "$ota_mode" = "keenboot" ]; then
@@ -1392,7 +1394,7 @@ firmware_manual_update() {
       exit 0
     fi
     if [ "$update_rc" -ne 0 ]; then
-      print_message "Обновление завершилось с ошибкой, слот не переключён" "$RED"
+      print_message "Обновление завершилось с ошибкой" "$RED"
       exit_function
     fi
     print_message "Прошивка успешно обновлена" "$GREEN"
@@ -1529,7 +1531,7 @@ rewrite_block() {
   if [ "$choice" = "00" ]; then
     main_menu
   fi
-  if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
+  if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
     print_message "Неверный выбор файла" "$RED"
     exit_function
   fi
@@ -1550,18 +1552,20 @@ rewrite_block() {
   error_occurred=0
   non_existent_parts=""
   valid_parts=0
+  arch="$(get_architecture)"
 
   for part in $choice; do
-    if [ "$part" = "0" ]; then
-      print_message "Внимание! Перезапись загрузчика опасная процедура, может привести к неработоспособности устройства!" "$RED"
-    fi
-
     if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
       non_existent_parts="$non_existent_parts $part"
       continue
     fi
 
     selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {gsub(/"/, "", $4); print $4}')
+
+    if [ "$selected_mtd" = "U-Boot" ]; then
+      print_message "Внимание! Перезапись загрузчика опасная процедура, может привести к неработоспособности устройства!" "$RED"
+    fi
+
     echo ""
     read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$part.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -1570,8 +1574,23 @@ rewrite_block() {
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         mountFS
       fi
-      perform_dd "$mtdFile" "/dev/mtdblock$part"
-      print_message "Раздел успешно перезаписан" "$GREEN"
+
+      if [ "$selected_mtd" = "U-Boot" ] && [ "$arch" = "aarch64" ]; then
+        if uboot_write_aarch64 "$(get_osvault)/files/keenboot/modules" "$mtdFile"; then
+          print_message "Раздел успешно перезаписан" "$GREEN"
+        else
+          print_message "Ошибка при перезаписи U-Boot" "$RED"
+          error_occurred=1
+        fi
+      else
+        if perform_dd "$mtdFile" "/dev/mtdblock$part"; then
+          print_message "Раздел успешно перезаписан" "$GREEN"
+        else
+          print_message "Ошибка при перезаписи раздела" "$RED"
+          error_occurred=1
+        fi
+      fi
+
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         umountFS
       fi
