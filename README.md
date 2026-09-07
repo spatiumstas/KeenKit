@@ -12,5 +12,5 @@
 ```
 opkg update && opkg install curl && curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main-english/install.sh" > /tmp/install.sh && sh /tmp/install.sh
 ```
-Launch in....:
+Running in:
 >`keenkit` or `/opt/keenkit.sh`
