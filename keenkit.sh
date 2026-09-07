@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.5"
+SCRIPT_VERSION="2.8.7"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -52,7 +52,7 @@ EOF
     printf "%b\n" "$get_repeaters_info"
   fi
   printf "${CYAN}Version:    ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}$(check_update)"
-  echo "1. Update Firmware from File"
+  echo "1. Update firmware from file"
   echo "2. Backup sections"
   echo "3. Backup  Entware"
   if get_host "$ndss_info"; then
@@ -230,7 +230,9 @@ native_fwupdate() {
 }
 
 check_update() {
-  REMOTE_VERSION=$(curl -s --max-time 1 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
+  local response
+  response=$(curl -s --max-time 1 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest")
+  REMOTE_VERSION=$(json_get_value "$response" '.tag_name')
   [ -z "$REMOTE_VERSION" ] && return
   [ "$REMOTE_VERSION" != "$SCRIPT_VERSION" ] && printf " | ${GREEN}Available $REMOTE_VERSION${NC}"
 }
@@ -403,16 +405,54 @@ is_uboot_writable() {
   [ "$flags" = "0x400" ]
 }
 
-get_bootloader_version() {
-    local device strings pattern found
-    device=/dev/$(awk -F: '/"U-Boot"/{print $1;exit}' /proc/mtd) || return
-    strings=$(strings "$device" 2>/dev/null)
+parse_bootloader_version() {
+    local strings="$1" pattern found
+    found=$(echo "$strings" | grep -m1 '^Version: (KB-')
+    [ -n "$found" ] && {
+        echo "KeenBOOT $(echo "$found" | sed -e 's/^Version: (//' -e 's/)$//')"
+        return
+    }
     for pattern in '^KeenBOOT ' 'U-Boot v' 'U-Boot '; do
         found=$(echo "$strings" | grep -m1 "$pattern")
         [ -n "$found" ] && {
             [ "$pattern" = '^KeenBOOT ' ] &&
                 echo "$found" ||
                 echo "$found" | sed 's/^.*U-Boot/U-Boot/'
+            return
+        }
+    done
+}
+
+get_xz_decompressor() {
+    local cmd
+    for cmd in xzcat unxz xz; do
+        command -v "$cmd" >/dev/null 2>&1 || continue
+        case "$cmd" in
+        xzcat) echo "xzcat" ;;
+        unxz) echo "unxz -c" ;;
+        xz) echo "xz -dc" ;;
+        esac
+        return 0
+    done
+    return 1
+}
+
+get_bootloader_version() {
+    local device version offset decompressor
+    device=/dev/$(awk -F: '/"U-Boot"/{print $1;exit}' /proc/mtd) || return
+    version=$(parse_bootloader_version "$(strings "$device" 2>/dev/null)")
+    [ -n "$version" ] && {
+        echo "$version"
+        return
+    }
+
+    decompressor=$(get_xz_decompressor) || return
+    for offset in $(strings -t d "$device" 2>/dev/null | awk '$2 == "7zXZ" { print $1 - 1 }'); do
+        [ "$offset" -gt 0 ] 2>/dev/null || continue
+        version=$(parse_bootloader_version "$(dd if="$device" bs="$offset" skip=1 2>/dev/null |
+            $decompressor 2>/dev/null | strings)")
+        [ -n "$version" ] && {
+            echo "$version"
             return
         }
     done
@@ -428,7 +468,7 @@ copy_dual_config() {
   cfg_slot2=$(get_mtd_index_by_name "Config_2")
 
   if [ -z "$cfg_slot1" ] || [ -z "$cfg_slot2" ]; then
-    print_message "Sections Config_1/Config_2 not found, configuration cannot be copied." "$RED"
+    print_message "Sections Config_1/Config_2 not found, configuration copying impossible." "$RED"
     return 1
   fi
 
@@ -722,7 +762,7 @@ packages_delete() {
   done
 
   if [ -n "$removed_packages" ]; then
-    print_message "Packages successfully deleted:$removed_packages" "$GREEN"
+    print_message "Packages removed successfully:$removed_packages" "$GREEN"
   fi
 
   if [ -n "$failed_packages" ]; then
@@ -986,17 +1026,19 @@ uboot_write_aarch64() {
   local base="$1" image="$2" module="$TMP_DIR/mtd_rw_all.ko" writer="$TMP_DIR/keenboot_writer" rc
 
   for file in mtd_rw_all.ko keenboot_writer; do
-    if ! curl -fLsS "$base/$file" --output "$TMP_DIR/$file" || [ ! -s "$TMP_DIR/$file" ]; then
+    if ! curl -fLsS "$base/$file" -o "$TMP_DIR/$file" || [ ! -s "$TMP_DIR/$file" ]; then
       print_message "Failed to Upload $file" "$RED"
       rm -f "$module" "$writer"
       return 1
     fi
   done
-  chmod 700 "$writer" || return 1
-  grep -q '^mtd2_unlock ' /proc/modules && rmmod mtd2_unlock 2>/dev/null || true
-  grep -q '^mtd_rw_all ' /proc/modules || insmod "$module" || return 1
+  chmod +x "$writer" || return 1
+  rmmod mtd2_unlock 2>/dev/null || true
+  rmmod mtd_rw_all 2>/dev/null || true
+  insmod "$module" || return 1
   "$writer" WRITE "$image"
   rc=$?
+  rmmod mtd_rw_all 2>/dev/null || true
   rm -f "$module" "$writer"
   return "$rc"
 }
@@ -1168,7 +1210,7 @@ ota_update() {
       fi
       if [ "$update_rc" -ne 2 ]; then
         if [ "$update_rc" -ne 0 ]; then
-          print_message "Update failed, slot not switched" "$RED"
+          print_message "Update failed" "$RED"
           exit_function
         fi
         if [ "$ota_mode" = "keenboot" ]; then
@@ -1323,7 +1365,7 @@ firmware_manual_update() {
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
-    print_message "Update file not found on drive" "$RED"
+    print_message "The update file was not found on the drive." "$RED"
     exit_function
   fi
 
@@ -1352,7 +1394,7 @@ firmware_manual_update() {
       exit 0
     fi
     if [ "$update_rc" -ne 0 ]; then
-      print_message "Update failed, slot not switched" "$RED"
+      print_message "Update failed" "$RED"
       exit_function
     fi
     print_message "Firmware updated successfully" "$GREEN"
@@ -1369,7 +1411,7 @@ firmware_manual_update() {
       ;;
     *) ;;
     esac
-    print_message "Rebooting Device..." "${CYAN}"
+    print_message "How to reboot the device..." "${CYAN}"
     sleep 1
     reboot
     ;;
@@ -1385,7 +1427,7 @@ backup_block() {
   printf "99. Backup all sections${NC}\n"
   exit_main_menu
   folder_path="$selected_drive/backup$DATE"
-  read -p "Specify the number of(а) Section(IP) separated by spaces: " choice
+  read -p "Specify the number of(а) Section(IP) Enter flitch heights, separated by commas or spaces: " choice
   echo ""
   choice=$(echo "$choice" | tr -d '\n\r')
 
@@ -1478,7 +1520,7 @@ rewrite_block() {
   files=$(find_files "$selected_drive" "60k")
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
-    print_message "Overwrite file not found in the selected repository" "$RED"
+    print_message "The replacement file was not found in the selected storage location." "$RED"
     exit_function
   fi
   echo "Files found:"
@@ -1489,7 +1531,7 @@ rewrite_block() {
   if [ "$choice" = "00" ]; then
     main_menu
   fi
-  if [ $choice -lt 1 ] || [ $choice -gt $count ]; then
+  if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
     print_message "Invalid File Selection" "$RED"
     exit_function
   fi
@@ -1500,7 +1542,7 @@ rewrite_block() {
   mtd_output=$(cat /proc/mtd)
   echo "$mtd_output" | awk 'NR>1 {print $0}'
   exit_main_menu
-  read -p "Specify the number of(а) Section(IP) separated by spaces: " choice
+  read -p "Specify the number of(а) Section(IP) Enter flitch heights, separated by commas or spaces: " choice
   choice=$(echo "$choice" | tr -d '\n\r')
 
   if [ "$choice" = "00" ]; then
@@ -1510,18 +1552,20 @@ rewrite_block() {
   error_occurred=0
   non_existent_parts=""
   valid_parts=0
+  arch="$(get_architecture)"
 
   for part in $choice; do
-    if [ "$part" = "0" ]; then
-      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
-    fi
-
     if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
       non_existent_parts="$non_existent_parts $part"
       continue
     fi
 
     selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {gsub(/"/, "", $4); print $4}')
+
+    if [ "$selected_mtd" = "U-Boot" ]; then
+      print_message "Warning: Rewriting the bootloader is a dangerous procedure, it may lead to inoperability of the device!" "$RED"
+    fi
+
     echo ""
     read -r -p "$(printf "Overwrite Section ${CYAN}mtd$part.$selected_mtd${NC} Washim ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -1530,8 +1574,23 @@ rewrite_block() {
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         mountFS
       fi
-      perform_dd "$mtdFile" "/dev/mtdblock$part"
-      print_message "Section successfully overwritten" "$GREEN"
+
+      if [ "$selected_mtd" = "U-Boot" ] && [ "$arch" = "aarch64" ]; then
+        if uboot_write_aarch64 "$(get_osvault)/files/keenboot/modules" "$mtdFile"; then
+          print_message "Section successfully overwritten" "$GREEN"
+        else
+          print_message "Error while overwriting U-Boot" "$RED"
+          error_occurred=1
+        fi
+      else
+        if perform_dd "$mtdFile" "/dev/mtdblock$part"; then
+          print_message "Section successfully overwritten" "$GREEN"
+        else
+          print_message "Error overwriting partition" "$RED"
+          error_occurred=1
+        fi
+      fi
+
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
         umountFS
       fi
