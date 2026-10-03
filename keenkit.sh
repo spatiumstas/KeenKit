@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.7"
+SCRIPT_VERSION="2.8.8"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -52,7 +52,7 @@ EOF
     printf "%b\n" "$get_repeaters_info"
   fi
   printf "${CYAN}Version:    ${NC}%s\n\n" "$SCRIPT_VERSION by ${USERNAME}$(check_update)"
-  echo "1. Update firmware from file"
+  echo "1. Update Firmware from File"
   echo "2. Backup sections"
   echo "3. Backup  Entware"
   if get_host "$ndss_info"; then
@@ -331,21 +331,19 @@ get_ram_usage() {
 }
 
 format_size() {
-  local used=$1
-  local total=$2
-  local used_mb=$((used / 1024 / 1024))
-  local total_mb=$((total / 1024 / 1024))
-  if [ "$total_mb" -ge 1024 ]; then
-    total_gb=$((total / 1024 / 1024 / 1024))
-    if [ "$used_mb" -lt 1024 ]; then
-      printf "%d MB / %d GB" $used_mb $total_gb
-    else
-      used_gb=$((used / 1024 / 1024 / 1024))
-      printf "%d / %d GB" $used_gb $total_gb
-    fi
-  else
-    printf "%d / %d MB" $used_mb $total_mb
-  fi
+  awk -v used="$1" -v total="$2" 'BEGIN {
+    mb = 1024 * 1024
+    gb = mb * 1024
+    total_gb = int(total / gb * 100) / 100
+    if (total < gb)
+      printf "%d / %d MB", used / mb, total / mb
+    else if (used < gb)
+      printf "%d MB / %.2f GB", used / mb, total_gb
+    else {
+      used_gb = int(used / gb * 100) / 100
+      printf "%.2f / %.2f GB", used_gb, total_gb
+    }
+  }'
 }
 
 get_opkg_storage() {
@@ -468,7 +466,7 @@ copy_dual_config() {
   cfg_slot2=$(get_mtd_index_by_name "Config_2")
 
   if [ -z "$cfg_slot1" ] || [ -z "$cfg_slot2" ]; then
-    print_message "Sections Config_1/Config_2 not found, configuration copying impossible." "$RED"
+    print_message "Sections Config_1/Config_2 not found, configuration cannot be copied." "$RED"
     return 1
   fi
 
@@ -705,7 +703,7 @@ spinner_start() {
     while :; do
       set -- "⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"
       eval "spin=\${$((i % 10 + 1))}"
-      printf "\r\033[0m[%s] %s\033[0m" "$spin" "$SPINNER_MSG"
+      printf '\r\033[K\033[0;37m[%s] %s\033[0m' "$spin" "$SPINNER_MSG"
       i=$((i + 1))
       usleep 100000
     done
@@ -762,7 +760,7 @@ packages_delete() {
   done
 
   if [ -n "$removed_packages" ]; then
-    print_message "Packages removed successfully:$removed_packages" "$GREEN"
+    print_message "Packages successfully deleted:$removed_packages" "$GREEN"
   fi
 
   if [ -n "$failed_packages" ]; then
@@ -1145,7 +1143,7 @@ ota_update() {
     fi
     total_size_mb=$((total_size / 1024 / 1024))
     free_space_mb=$(get_internal_storage_size free)
-    if [ "$free_space_mb" -ge "$total_size_mb" ]; then
+    if [ -n "$free_space_mb" ] && [ "$free_space_mb" -ge "$total_size_mb" ]; then
       DOWNLOAD_PATH="$STORAGE_DIR"
       use_mount=true
     else
@@ -1365,7 +1363,7 @@ firmware_manual_update() {
   count=$(echo "$files" | wc -l)
 
   if [ -z "$files" ]; then
-    print_message "The update file was not found on the drive." "$RED"
+    print_message "Update file not found on drive" "$RED"
     exit_function
   fi
 
@@ -1427,7 +1425,7 @@ backup_block() {
   printf "99. Backup all sections${NC}\n"
   exit_main_menu
   folder_path="$selected_drive/backup$DATE"
-  read -p "Specify the number of(а) Section(IP) Enter flitch heights, separated by commas or spaces: " choice
+  read -p "Specify the number of(а) Section(IP) separated by spaces: " choice
   echo ""
   choice=$(echo "$choice" | tr -d '\n\r')
 
@@ -1520,7 +1518,7 @@ rewrite_block() {
   files=$(find_files "$selected_drive" "60k")
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then
-    print_message "The replacement file was not found in the selected storage location." "$RED"
+    print_message "Overwrite file not found in the selected repository" "$RED"
     exit_function
   fi
   echo "Files found:"
@@ -1542,7 +1540,7 @@ rewrite_block() {
   mtd_output=$(cat /proc/mtd)
   echo "$mtd_output" | awk 'NR>1 {print $0}'
   exit_main_menu
-  read -p "Specify the number of(а) Section(IP) Enter flitch heights, separated by commas or spaces: " choice
+  read -p "Specify the number of(а) Section(IP) separated by spaces: " choice
   choice=$(echo "$choice" | tr -d '\n\r')
 
   if [ "$choice" = "00" ]; then
