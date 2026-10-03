@@ -12,7 +12,7 @@ SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.7"
+SCRIPT_VERSION="2.8.8"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -331,21 +331,19 @@ get_ram_usage() {
 }
 
 format_size() {
-  local used=$1
-  local total=$2
-  local used_mb=$((used / 1024 / 1024))
-  local total_mb=$((total / 1024 / 1024))
-  if [ "$total_mb" -ge 1024 ]; then
-    total_gb=$((total / 1024 / 1024 / 1024))
-    if [ "$used_mb" -lt 1024 ]; then
-      printf "%d MB / %d GB" $used_mb $total_gb
-    else
-      used_gb=$((used / 1024 / 1024 / 1024))
-      printf "%d / %d GB" $used_gb $total_gb
-    fi
-  else
-    printf "%d / %d MB" $used_mb $total_mb
-  fi
+  awk -v used="$1" -v total="$2" 'BEGIN {
+    mb = 1024 * 1024
+    gb = mb * 1024
+    total_gb = int(total / gb * 100) / 100
+    if (total < gb)
+      printf "%d / %d MB", used / mb, total / mb
+    else if (used < gb)
+      printf "%d MB / %.2f GB", used / mb, total_gb
+    else {
+      used_gb = int(used / gb * 100) / 100
+      printf "%.2f / %.2f GB", used_gb, total_gb
+    }
+  }'
 }
 
 get_opkg_storage() {
@@ -705,7 +703,7 @@ spinner_start() {
     while :; do
       set -- "⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"
       eval "spin=\${$((i % 10 + 1))}"
-      printf "\r\033[0m[%s] %s\033[0m" "$spin" "$SPINNER_MSG"
+      printf '\r\033[K\033[0;37m[%s] %s\033[0m' "$spin" "$SPINNER_MSG"
       i=$((i + 1))
       usleep 100000
     done
@@ -1145,7 +1143,7 @@ ota_update() {
     fi
     total_size_mb=$((total_size / 1024 / 1024))
     free_space_mb=$(get_internal_storage_size free)
-    if [ "$free_space_mb" -ge "$total_size_mb" ]; then
+    if [ -n "$free_space_mb" ] && [ "$free_space_mb" -ge "$total_size_mb" ]; then
       DOWNLOAD_PATH="$STORAGE_DIR"
       use_mount=true
     else
