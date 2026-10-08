@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main-english
           fetch-depth: 0
@@ -25,7 +25,7 @@ jobs:
           git checkout origin/main -- keenkit.sh install.sh README.md
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
@@ -60,7 +60,7 @@ jobs:
 
       - name: Create Pull Request
         if: steps.git-check.outputs.changes_exist == 'true'
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: Update English translations"

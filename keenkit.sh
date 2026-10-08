@@ -11,13 +11,13 @@ REPO="KeenKit"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
+CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.8.8"
+SCRIPT_VERSION="2.9"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
-ARCHITECTURE=""
 
 print_menu() {
   local version_info system_info ndss_info
@@ -60,9 +60,7 @@ EOF
     echo "5. OTA Update"
     echo "6. Обновить сервисные данные"
   fi
-  if ! { [ "$arch" = "aarch64" ] && get_host "$ndss_info"; }; then
-    echo "7. Переключить слот"
-  fi
+  echo "7. Переключить слот"
   if get_host "$ndss_info" && { [ "$arch" != "mipsel" ] || is_uboot_writable; }; then
     echo "8. KeenBOOT OTA Update"
   fi
@@ -560,19 +558,15 @@ get_ndm_storage() {
 }
 
 get_architecture() {
-  if [ -z "$ARCHITECTURE" ]; then
-    local arch
-    arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
+  local arch
+  arch=$(opkg print-architecture | grep -oE 'mips-3|mipsel-3|aarch64-3' | head -n 1)
 
-    case "$arch" in
-    "mips-3") ARCHITECTURE="mips" ;;
-    "mipsel-3") ARCHITECTURE="mipsel" ;;
-    "aarch64-3") ARCHITECTURE="aarch64" ;;
-    *) ARCHITECTURE="unknown_arch" ;;
-    esac
-  fi
-
-  echo "$ARCHITECTURE"
+  case "$arch" in
+  "mips-3") echo "mips" ;;
+  "mipsel-3") echo "mipsel" ;;
+  "aarch64-3") echo "aarch64" ;;
+  *) echo "unknown_arch" ;;
+  esac
 }
 
 get_radio_temp() {
@@ -978,8 +972,7 @@ exit_main_menu() {
 script_update() {
   packages_checker "curl libcurl"
 
-  UPDATE_URLS="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT
-  $(get_osvault)/scripts/keenkit.sh"
+  UPDATE_URLS="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT"
 
   update_success=0
   for url in $UPDATE_URLS; do
@@ -1016,20 +1009,87 @@ umountFS() {
   print_message "UnlockFS: true"
 }
 
-get_osvault() {
-  echo "b3N2YXVsdC5rZWVuZXRpY3BvcnRlZC5kZXY=" | base64 -d
+get_ota_domain() {
+  local domain="" confirm
+  if [ "${1:-}" != "new" ] && [ -f "$CONFIG_FILE" ]; then
+    domain=$(sed -n 's/^domain="\([^"]*\)"$/\1/p' "$CONFIG_FILE")
+  fi
+  domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
+
+  if [ -z "$domain" ]; then
+    if [ "${1:-}" = "new" ]; then
+      if ! read -r -p "Изменить домен? (y/n) " confirm; then
+        return 1
+      fi
+      case "$confirm" in
+      y | Y) ;;
+      *) return 1 ;;
+      esac
+    fi
+    if ! read -r -p "Введите домен: " domain; then
+      return 1
+    fi
+    domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
+    if [ -z "$domain" ]; then
+      print_message "Домен не указан" "$RED" >&2
+      return 1
+    fi
+  fi
+
+  printf '%s\n' "$domain"
+}
+
+save_ota_domain() {
+  local domain="$1" saved_domain=""
+  if [ -f "$CONFIG_FILE" ]; then
+    IFS= read -r saved_domain < "$CONFIG_FILE"
+  fi
+  [ "$saved_domain" != "domain=\"$domain\"" ] || return 0
+
+  if mkdir -p "${CONFIG_FILE%/*}" &&
+    printf 'domain="%s"\n' "$domain" > "$CONFIG_FILE"; then
+    print_message "Домен сохранён в $CONFIG_FILE" "$GREEN"
+  else
+    print_message "Не удалось сохранить домен в $CONFIG_FILE" "$RED"
+    return 1
+  fi
+}
+
+ota_request() {
+  local url="$1"
+  shift
+
+  if ! curl -fLs "$url" "$@"; then
+    url=$(printf '%s' "$url" | sed 's/%/%%/g')
+    print_message "Не удалось получить: $url" "$RED" >&2
+    return 1
+  fi
 }
 
 uboot_write_aarch64() {
-  local base="$1" image="$2" module="$TMP_DIR/mtd_rw_all.ko" writer="$TMP_DIR/keenboot_writer" rc
+  local image="$1" module="$TMP_DIR/mtd_rw_all.ko" writer="$TMP_DIR/keenboot_writer" rc
+  local domain base file
+  domain=$(get_ota_domain) || return 1
 
-  for file in mtd_rw_all.ko keenboot_writer; do
-    if ! curl -fLsS "$base/$file" -o "$TMP_DIR/$file" || [ ! -s "$TMP_DIR/$file" ]; then
-      print_message "Не удалось загрузить $file" "$RED"
-      rm -f "$module" "$writer"
-      return 1
-    fi
+  while true; do
+    base="$domain/files/keenboot/modules"
+    rc=0
+    for file in mtd_rw_all.ko keenboot_writer; do
+      if ! ota_request "$base/$file" -o "$TMP_DIR/$file"; then
+        rc=1
+        break
+      fi
+      if [ ! -s "$TMP_DIR/$file" ]; then
+        print_message "Файл пуст или не был загружен: $(printf '%s' "$base/$file" | sed 's/%/%%/g')" "$RED"
+        rc=1
+        break
+      fi
+    done
+    [ "$rc" -ne 0 ] || break
+    rm -f "$module" "$writer"
+    domain=$(get_ota_domain new) || return 1
   done
+  save_ota_domain "$domain"
   chmod +x "$writer" || return 1
   rmmod mtd2_unlock 2>/dev/null || true
   rmmod mtd_rw_all 2>/dev/null || true
@@ -1061,22 +1121,26 @@ show_progress() {
 
 ota_update() {
   check_host
-  local ota_mode="${1:-firmware}" arch
+  local ota_mode="${1:-firmware}" arch domain ota_path osvault file_url md5_url
   packages_checker "curl findutils libcurl"
   if [ "$ota_mode" = "keenboot" ]; then
     arch=$(get_architecture)
     [ "$arch" != "mipsel" ] || is_uboot_writable || return 1
-    osvault="$(get_osvault)/files/keenboot/$arch"
+    ota_path="/files/keenboot/$arch"
   else
-    osvault="$(get_osvault)/osvault"
+    ota_path="/osvault"
   fi
-  REQUEST=$(curl -fLsS "$osvault")
-  DIRS=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
-
-  if [ -z "$DIRS" ]; then
-    print_message "Ошибка при получении данных, попробуйте позже" "$RED"
-    exit_function
-  fi
+  domain=$(get_ota_domain) || { exit_function; return 1; }
+  while true; do
+    osvault="$domain$ota_path"
+    if REQUEST=$(ota_request "$osvault"); then
+      DIRS=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -E '^[^/?#]+/$' | grep -vE '^\.\.?/$' | sed 's|/$||' | sed 's|%20| |g')
+      [ -z "$DIRS" ] || break
+      print_message "Не найдены каталоги OTA: $(printf '%s' "$osvault" | sed 's/%/%%/g')" "$RED"
+    fi
+    domain=$(get_ota_domain new) || { exit_function; return 1; }
+  done
+  save_ota_domain "$domain"
 
   local current_device_model=$(get_device)
   print_list_with_highlight "$DIRS" "$current_device_model"
@@ -1099,11 +1163,11 @@ ota_update() {
   DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
   DIR_ENCODED=$(echo "$DIR" | sed 's/ /%20/g')
 
-  REQUEST=$(curl -fLsS "$osvault/$DIR_ENCODED/" 2>/dev/null)
+  REQUEST=$(ota_request "$osvault/$DIR_ENCODED/") || { exit_function; return 1; }
   BIN_FILES=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep '\.bin$' | sed 's|%20| |g')
 
   if [ -z "$BIN_FILES" ]; then
-    printf "${RED}В директории $DIR нет файлов.${NC}\n"
+    print_message "В директории $(printf '%s' "$osvault/$DIR_ENCODED/" | sed 's/%/%%/g') нет файлов." "$RED"
     exit_function
   else
     printf "\nВерсии для $DIR:\n"
@@ -1136,9 +1200,11 @@ ota_update() {
       print_message "Файл не выбран" "$RED"
       exit_function
     fi
-    total_size=$(curl -fsSIL "$osvault/$DIR_ENCODED/$FILE_ENCODED" 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
+    file_url="$osvault/$DIR_ENCODED/$FILE_ENCODED"
+    md5_url="$osvault/$DIR_ENCODED/md5sum"
+    total_size=$(curl -fsSIL "$file_url" 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     if ! echo "$total_size" | grep -qE '^[0-9]+$' || [ "$total_size" -le 0 ]; then
-      print_message "Не удалось определить размер файла прошивки" "$RED"
+      print_message "Не удалось определить размер файла: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
       exit_function
     fi
     total_size_mb=$((total_size / 1024 / 1024))
@@ -1154,14 +1220,26 @@ ota_update() {
     echo ""
     show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" "$FILE" &
     progress_pid=$!
-    curl -fLsS "$osvault/$DIR_ENCODED/$FILE_ENCODED" --output "$DOWNLOAD_PATH/$FILE"
-    wait $progress_pid
-    if [ ! -f "$DOWNLOAD_PATH/$FILE" ]; then
-      printf "${RED}Файл $FILE не был загружен/найден.${NC}\n"
+    if ! ota_request "$file_url" --output "$DOWNLOAD_PATH/$FILE"; then
+      kill "$progress_pid" 2>/dev/null
+      wait "$progress_pid" 2>/dev/null
+      rm -f "$DOWNLOAD_PATH/$FILE"
       exit_function
+      return 1
+    fi
+    kill "$progress_pid" 2>/dev/null
+    wait "$progress_pid" 2>/dev/null
+    if [ ! -s "$DOWNLOAD_PATH/$FILE" ]; then
+      print_message "Файл пуст или не был загружен: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
+      exit_function
+      return 1
     fi
 
-    curl -fLsS "$osvault/$DIR_ENCODED/md5sum" --output "$DOWNLOAD_PATH/md5sum"
+    if ! ota_request "$md5_url" --output "$DOWNLOAD_PATH/md5sum"; then
+      rm -f "$DOWNLOAD_PATH/$FILE" "$DOWNLOAD_PATH/md5sum"
+      exit_function
+      return 1
+    fi
     MD5SUM_REMOTE=$(grep "$FILE" "$DOWNLOAD_PATH/md5sum" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     MD5SUM_LOCAL=$(md5sum "$DOWNLOAD_PATH/$FILE" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
     if [ "$MD5SUM_REMOTE" != "$MD5SUM_LOCAL" ]; then
@@ -1181,7 +1259,7 @@ ota_update() {
     y | Y)
       if [ "$ota_mode" = "keenboot" ]; then
         if [ "$arch" = "aarch64" ]; then
-          uboot_write_aarch64 "$(get_osvault)/files/keenboot/modules" "$DOWNLOAD_PATH/$FILE"
+          uboot_write_aarch64 "$DOWNLOAD_PATH/$FILE"
         else
           ubootSlot=$(get_mtd_index_by_name "U-Boot")
           perform_dd "$DOWNLOAD_PATH/$FILE" "/dev/mtdblock$ubootSlot"
@@ -1574,7 +1652,7 @@ rewrite_block() {
       fi
 
       if [ "$selected_mtd" = "U-Boot" ] && [ "$arch" = "aarch64" ]; then
-        if uboot_write_aarch64 "$(get_osvault)/files/keenboot/modules" "$mtdFile"; then
+        if uboot_write_aarch64 "$mtdFile"; then
           print_message "Раздел успешно перезаписан" "$GREEN"
         else
           print_message "Ошибка при перезаписи U-Boot" "$RED"
@@ -1628,9 +1706,10 @@ service() {
   target_flag=$1
   packages_checker "curl python3-base python3 python3-light libpython3 findutils" "--nodeps"
 
-  curl -fLsS "$(get_osvault)/scripts/service.py" --output "$SCRIPT_PATH"
+  local service_url="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/service.py"
+  curl -fLs "$service_url" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ] || ! head -n1 "$SCRIPT_PATH" | grep -q "^#\|^import\|^def\|^class"; then
-    print_message "Ошибка при получении файла, попробуйте позже" "$RED"
+    print_message "Ошибка при получении файла: $service_url" "$RED"
     exit_function
   fi
 
@@ -1664,7 +1743,7 @@ service() {
   case "$item_rc1" in
   y | Y)
     echo ""
-    printf "${CYAN}Перезаписываю первый раздел...${NC}\n"
+    printf "${CYAN}Перезаписываю раздел...${NC}\n"
     perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot"
     if [ -n "$mtdSlot_res" ]; then
       echo ""
