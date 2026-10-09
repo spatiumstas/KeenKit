@@ -60,9 +60,7 @@ EOF
     echo "5. OTA Update"
     echo "6. Update Service Data"
   fi
-  if ! { [ "$arch" = "aarch64" ] && get_host "$ndss_info"; }; then
-    echo "7. Switch Slot"
-  fi
+  echo "7. Switch Slot"
   if get_host "$ndss_info" && { [ "$arch" != "mipsel" ] || is_uboot_writable; }; then
     echo "8. KeenBOOT OTA Update"
   fi
@@ -1028,7 +1026,7 @@ get_ota_domain() {
       *) return 1 ;;
       esac
     fi
-    if ! read -r -p "Enter your Domain. (eg., example.com or http://192.168.1.2:8000): " domain; then
+    if ! read -r -p "Enter your Domain.: " domain; then
       return 1
     fi
     domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
@@ -1136,7 +1134,7 @@ ota_update() {
   while true; do
     osvault="$domain$ota_path"
     if REQUEST=$(ota_request "$osvault"); then
-      DIRS=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '^\.\./$' | grep -v '^/$' | sed 's|/$||' | sed 's|%20| |g')
+      DIRS=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -E '^[^/?#]+/$' | grep -vE '^\.\.?/$' | sed 's|/$||' | sed 's|%20| |g')
       [ -z "$DIRS" ] || break
       print_message "No directories found OTA: $(printf '%s' "$osvault" | sed 's/%/%%/g')" "$RED"
     fi
