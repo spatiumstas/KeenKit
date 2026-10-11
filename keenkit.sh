@@ -8,12 +8,13 @@ BRANCH="main"
 USERNAME="spatiumstas"
 USER='root'
 REPO="KeenKit"
+PAGES_URL="https://$USERNAME.github.io/$REPO"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.9"
+SCRIPT_VERSION="2.9.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -65,7 +66,7 @@ EOF
     echo "8. KeenBOOT OTA Update"
   fi
   printf "\n77. Change language"
-  printf "\n88. Удалить используемые пакеты\n"
+  printf "\n88. Удалить пакеты и настройки\n"
   echo "99. Обновить скрипт"
   echo "00. Выход"
   echo ""
@@ -764,7 +765,10 @@ packages_delete() {
   if [ -z "$removed_packages" ] && [ -z "$failed_packages" ]; then
     print_message "Используемые пакеты не установлены" "$CYAN"
   fi
-
+  if [ -f "$CONFIG_FILE" ]; then
+    rm -f "$CONFIG_FILE"
+    print_message "Файл удален: $CONFIG_FILE" "$CYAN"
+  fi
   exit_function
 }
 
@@ -953,6 +957,7 @@ backup_config() {
 }
 
 exit_function() {
+  ota_cleanup
   echo ""
   if [ ! -t 0 ]; then
     exit 0
@@ -1012,10 +1017,8 @@ umountFS() {
 get_ota_domain() {
   local domain="" confirm
   if [ "${1:-}" != "new" ] && [ -f "$CONFIG_FILE" ]; then
-    domain=$(sed -n 's/^domain="\([^"]*\)"$/\1/p' "$CONFIG_FILE")
+    domain=$(sed -n 's/^domain="\(.*\)"$/\1/p' "$CONFIG_FILE" | head -n 1)
   fi
-  domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
-
   if [ -z "$domain" ]; then
     if [ "${1:-}" = "new" ]; then
       if ! read -r -p "Изменить домен? (y/n) " confirm; then
@@ -1029,13 +1032,13 @@ get_ota_domain() {
     if ! read -r -p "Введите домен: " domain; then
       return 1
     fi
-    domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
-    if [ -z "$domain" ]; then
-      print_message "Домен не указан" "$RED" >&2
-      return 1
-    fi
   fi
 
+  domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
+  if [ -z "$domain" ]; then
+    print_message "Домен не указан" "$RED" >&2
+    return 1
+  fi
   printf '%s\n' "$domain"
 }
 
@@ -1058,38 +1061,39 @@ save_ota_domain() {
 ota_request() {
   local url="$1"
   shift
-
-  if ! curl -fLs "$url" "$@"; then
+  if ! curl -fLs --basic "$url" "$@"; then
     url=$(printf '%s' "$url" | sed 's/%/%%/g')
     print_message "Не удалось получить: $url" "$RED" >&2
     return 1
   fi
 }
 
+ota_cleanup() {
+  if [ -n "$progress_pid" ]; then
+    kill "$progress_pid" 2>/dev/null
+    wait "$progress_pid" 2>/dev/null
+    unset progress_pid
+  fi
+  if [ -n "$DOWNLOAD_PATH" ] && [ -n "$FILE" ]; then
+    rm -f "$DOWNLOAD_PATH/$FILE" "$DOWNLOAD_PATH/md5sum"
+  fi
+  unset DOWNLOAD_PATH FILE
+}
+
 uboot_write_aarch64() {
   local image="$1" module="$TMP_DIR/mtd_rw_all.ko" writer="$TMP_DIR/keenboot_writer" rc
-  local domain base file
-  domain=$(get_ota_domain) || return 1
-
-  while true; do
-    base="$domain/files/keenboot/modules"
-    rc=0
-    for file in mtd_rw_all.ko keenboot_writer; do
-      if ! ota_request "$base/$file" -o "$TMP_DIR/$file"; then
-        rc=1
-        break
-      fi
-      if [ ! -s "$TMP_DIR/$file" ]; then
-        print_message "Файл пуст или не был загружен: $(printf '%s' "$base/$file" | sed 's/%/%%/g')" "$RED"
-        rc=1
-        break
-      fi
-    done
-    [ "$rc" -ne 0 ] || break
-    rm -f "$module" "$writer"
-    domain=$(get_ota_domain new) || return 1
+  local base="$PAGES_URL/files/keenboot/modules" file
+  for file in mtd_rw_all.ko keenboot_writer; do
+    if ! ota_request "$base/$file" -o "$TMP_DIR/$file"; then
+      rm -f "$module" "$writer"
+      return 1
+    fi
+    if [ ! -s "$TMP_DIR/$file" ]; then
+      print_message "Файл пуст или не был загружен: $(printf '%s' "$base/$file" | sed 's/%/%%/g')" "$RED"
+      rm -f "$module" "$writer"
+      return 1
+    fi
   done
-  save_ota_domain "$domain"
   chmod +x "$writer" || return 1
   rmmod mtd2_unlock 2>/dev/null || true
   rmmod mtd_rw_all 2>/dev/null || true
@@ -1202,7 +1206,7 @@ ota_update() {
     fi
     file_url="$osvault/$DIR_ENCODED/$FILE_ENCODED"
     md5_url="$osvault/$DIR_ENCODED/md5sum"
-    total_size=$(curl -fsSIL "$file_url" 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
+    total_size=$(ota_request "$file_url" -I 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     if ! echo "$total_size" | grep -qE '^[0-9]+$' || [ "$total_size" -le 0 ]; then
       print_message "Не удалось определить размер файла: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
       exit_function
@@ -1229,6 +1233,7 @@ ota_update() {
     fi
     kill "$progress_pid" 2>/dev/null
     wait "$progress_pid" 2>/dev/null
+    unset progress_pid
     if [ ! -s "$DOWNLOAD_PATH/$FILE" ]; then
       print_message "Файл пуст или не был загружен: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
       exit_function
@@ -1277,8 +1282,7 @@ ota_update() {
       ;;
     esac
 
-    rm -f "$DOWNLOAD_PATH/$FILE"
-    rm -f "$DOWNLOAD_PATH/md5sum"
+    ota_cleanup
 
     if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
       if [ "$update_rc" -eq 2 ]; then
@@ -1706,7 +1710,7 @@ service() {
   target_flag=$1
   packages_checker "curl python3-base python3 python3-light libpython3 findutils" "--nodeps"
 
-  local service_url="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/service.py"
+  local service_url="$PAGES_URL/service.py"
   curl -fLs "$service_url" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ] || ! head -n1 "$SCRIPT_PATH" | grep -q "^#\|^import\|^def\|^class"; then
     print_message "Ошибка при получении файла: $service_url" "$RED"
@@ -1790,6 +1794,7 @@ changeLanguage() {
 
 cleanup() {
   rc=$?
+  ota_cleanup
   if [ -n "$SPINNER_PID" ]; then
     kill "$SPINNER_PID" 2>/dev/null
     wait "$SPINNER_PID" 2>/dev/null
