@@ -1,0 +1,75 @@
+name: Publish dev to GitHub Pages
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Prepare files and directory listings
+        run: |
+          python3 - <<'PY'
+          import html
+          import shutil
+          from pathlib import Path
+          from urllib.parse import quote
+
+          site = Path("_site")
+          site.mkdir()
+          for source in Path(".").iterdir():
+              if source.name.startswith(".") or source == site:
+                  continue
+              target = site / source.name
+              if source.is_dir():
+                  shutil.copytree(source, target)
+              else:
+                  shutil.copy2(source, target)
+
+          directories = [site, *[path for path in site.rglob("*") if path.is_dir()]]
+          for directory in directories:
+              index = directory / "index.html"
+              if index.exists():
+                  continue
+              title = "/" if directory == site else "/" + directory.relative_to(site).as_posix() + "/"
+              links = ['<a href="../">../</a>'] if directory != site else []
+              for entry in sorted(directory.iterdir(), key=lambda path: (not path.is_dir(), path.name)):
+                  name = entry.name + ("/" if entry.is_dir() else "")
+                  links.append(f'<a href="{quote(name)}">{html.escape(name)}</a>')
+              index.write_text(
+                  '<html><head><title>KeenKit repo</title></head><body>\n'
+                  f'<h1>Index of {html.escape(title)}</h1><hr>\n'
+                  '<pre>\n' + "\n".join(links) + '\n</pre>\n'
+                  '<hr></body></html>\n',
+                  encoding="utf-8",
+              )
+          PY
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./_site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
