@@ -8,12 +8,13 @@ BRANCH="main"
 USERNAME="spatiumstas"
 USER='root'
 REPO="KeenKit"
+PAGES_URL="https://$USERNAME.github.io/$REPO"
 SCRIPT="keenkit.sh"
 TMP_DIR="/tmp"
 OPT_DIR="/opt"
 CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.9"
+SCRIPT_VERSION="2.9.1"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -1068,28 +1069,18 @@ ota_request() {
 
 uboot_write_aarch64() {
   local image="$1" module="$TMP_DIR/mtd_rw_all.ko" writer="$TMP_DIR/keenboot_writer" rc
-  local domain base file
-  domain=$(get_ota_domain) || return 1
-
-  while true; do
-    base="$domain/files/keenboot/modules"
-    rc=0
-    for file in mtd_rw_all.ko keenboot_writer; do
-      if ! ota_request "$base/$file" -o "$TMP_DIR/$file"; then
-        rc=1
-        break
-      fi
-      if [ ! -s "$TMP_DIR/$file" ]; then
-        print_message "Файл пуст или не был загружен: $(printf '%s' "$base/$file" | sed 's/%/%%/g')" "$RED"
-        rc=1
-        break
-      fi
-    done
-    [ "$rc" -ne 0 ] || break
-    rm -f "$module" "$writer"
-    domain=$(get_ota_domain new) || return 1
+  local base="$PAGES_URL/files/keenboot/modules" file
+  for file in mtd_rw_all.ko keenboot_writer; do
+    if ! ota_request "$base/$file" -o "$TMP_DIR/$file"; then
+      rm -f "$module" "$writer"
+      return 1
+    fi
+    if [ ! -s "$TMP_DIR/$file" ]; then
+      print_message "Файл пуст или не был загружен: $(printf '%s' "$base/$file" | sed 's/%/%%/g')" "$RED"
+      rm -f "$module" "$writer"
+      return 1
+    fi
   done
-  save_ota_domain "$domain"
   chmod +x "$writer" || return 1
   rmmod mtd2_unlock 2>/dev/null || true
   rmmod mtd_rw_all 2>/dev/null || true
@@ -1140,7 +1131,7 @@ ota_update() {
     fi
     domain=$(get_ota_domain new) || { exit_function; return 1; }
   done
-  save_ota_domain "$domain"
+    save_ota_domain "$domain"
 
   local current_device_model=$(get_device)
   print_list_with_highlight "$DIRS" "$current_device_model"
@@ -1706,7 +1697,7 @@ service() {
   target_flag=$1
   packages_checker "curl python3-base python3 python3-light libpython3 findutils" "--nodeps"
 
-  local service_url="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/service.py"
+  local service_url="$PAGES_URL/service.py"
   curl -fLs "$service_url" --output "$SCRIPT_PATH"
   if [ $? -ne 0 ] || ! head -n1 "$SCRIPT_PATH" | grep -q "^#\|^import\|^def\|^class"; then
     print_message "Ошибка при получении файла: $service_url" "$RED"
