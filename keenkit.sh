@@ -14,7 +14,7 @@ TMP_DIR="/tmp"
 OPT_DIR="/opt"
 CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.9.1"
+SCRIPT_VERSION="2.9.2"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -66,7 +66,7 @@ EOF
     echo "8. KeenBOOT OTA Update"
   fi
   printf "\n77. Сменить язык"
-  printf "\n88. Delete used packages\n"
+  printf "\n88. Delete packages and settings\n"
   echo "99. Update Script"
   echo "00. Exit"
   echo ""
@@ -765,7 +765,10 @@ packages_delete() {
   if [ -z "$removed_packages" ] && [ -z "$failed_packages" ]; then
     print_message "The packages used are not installed" "$CYAN"
   fi
-
+  if [ -f "$CONFIG_FILE" ]; then
+    rm -f "$CONFIG_FILE"
+    print_message "File deleted: $CONFIG_FILE" "$CYAN"
+  fi
   exit_function
 }
 
@@ -954,6 +957,7 @@ backup_config() {
 }
 
 exit_function() {
+  ota_cleanup
   echo ""
   if [ ! -t 0 ]; then
     exit 0
@@ -1013,10 +1017,8 @@ umountFS() {
 get_ota_domain() {
   local domain="" confirm
   if [ "${1:-}" != "new" ] && [ -f "$CONFIG_FILE" ]; then
-    domain=$(sed -n 's/^domain="\([^"]*\)"$/\1/p' "$CONFIG_FILE")
+    domain=$(sed -n 's/^domain="\(.*\)"$/\1/p' "$CONFIG_FILE" | head -n 1)
   fi
-  domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
-
   if [ -z "$domain" ]; then
     if [ "${1:-}" = "new" ]; then
       if ! read -r -p "Modify domain? (y/n) " confirm; then
@@ -1030,13 +1032,13 @@ get_ota_domain() {
     if ! read -r -p "Enter your Domain.: " domain; then
       return 1
     fi
-    domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
-    if [ -z "$domain" ]; then
-      print_message "No domain specified" "$RED" >&2
-      return 1
-    fi
   fi
 
+  domain=$(printf '%s' "$domain" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
+  if [ -z "$domain" ]; then
+    print_message "No domain specified" "$RED" >&2
+    return 1
+  fi
   printf '%s\n' "$domain"
 }
 
@@ -1059,12 +1061,23 @@ save_ota_domain() {
 ota_request() {
   local url="$1"
   shift
-
-  if ! curl -fLs "$url" "$@"; then
+  if ! curl -fLs --basic "$url" "$@"; then
     url=$(printf '%s' "$url" | sed 's/%/%%/g')
     print_message "Failed to fetch: $url" "$RED" >&2
     return 1
   fi
+}
+
+ota_cleanup() {
+  if [ -n "$progress_pid" ]; then
+    kill "$progress_pid" 2>/dev/null
+    wait "$progress_pid" 2>/dev/null
+    unset progress_pid
+  fi
+  if [ -n "$DOWNLOAD_PATH" ] && [ -n "$FILE" ]; then
+    rm -f "$DOWNLOAD_PATH/$FILE" "$DOWNLOAD_PATH/md5sum"
+  fi
+  unset DOWNLOAD_PATH FILE
 }
 
 uboot_write_aarch64() {
@@ -1193,7 +1206,7 @@ ota_update() {
     fi
     file_url="$osvault/$DIR_ENCODED/$FILE_ENCODED"
     md5_url="$osvault/$DIR_ENCODED/md5sum"
-    total_size=$(curl -fsSIL "$file_url" 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
+    total_size=$(ota_request "$file_url" -I 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     if ! echo "$total_size" | grep -qE '^[0-9]+$' || [ "$total_size" -le 0 ]; then
       print_message "Cannot calculate the filesize: %1: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
       exit_function
@@ -1220,6 +1233,7 @@ ota_update() {
     fi
     kill "$progress_pid" 2>/dev/null
     wait "$progress_pid" 2>/dev/null
+    unset progress_pid
     if [ ! -s "$DOWNLOAD_PATH/$FILE" ]; then
       print_message "File is empty or has not been uploaded: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
       exit_function
@@ -1268,8 +1282,7 @@ ota_update() {
       ;;
     esac
 
-    rm -f "$DOWNLOAD_PATH/$FILE"
-    rm -f "$DOWNLOAD_PATH/md5sum"
+    ota_cleanup
 
     if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
       if [ "$update_rc" -eq 2 ]; then
@@ -1781,6 +1794,7 @@ changeLanguage() {
 
 cleanup() {
   rc=$?
+  ota_cleanup
   if [ -n "$SPINNER_PID" ]; then
     kill "$SPINNER_PID" 2>/dev/null
     wait "$SPINNER_PID" 2>/dev/null
