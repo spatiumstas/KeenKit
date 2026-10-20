@@ -14,7 +14,7 @@ TMP_DIR="/tmp"
 OPT_DIR="/opt"
 CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.9.2"
+SCRIPT_VERSION="2.9.3"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -420,22 +420,8 @@ parse_bootloader_version() {
     done
 }
 
-get_xz_decompressor() {
-    local cmd
-    for cmd in xzcat unxz xz; do
-        command -v "$cmd" >/dev/null 2>&1 || continue
-        case "$cmd" in
-        xzcat) echo "xzcat" ;;
-        unxz) echo "unxz -c" ;;
-        xz) echo "xz -dc" ;;
-        esac
-        return 0
-    done
-    return 1
-}
-
 get_bootloader_version() {
-    local device version offset decompressor
+    local device version offset
     device=/dev/$(awk -F: '/"U-Boot"/{print $1;exit}' /proc/mtd) || return
     version=$(parse_bootloader_version "$(strings "$device" 2>/dev/null)")
     [ -n "$version" ] && {
@@ -443,11 +429,10 @@ get_bootloader_version() {
         return
     }
 
-    decompressor=$(get_xz_decompressor) || return
     for offset in $(strings -t d "$device" 2>/dev/null | awk '$2 == "7zXZ" { print $1 - 1 }'); do
         [ "$offset" -gt 0 ] 2>/dev/null || continue
-        version=$(parse_bootloader_version "$(dd if="$device" bs="$offset" skip=1 2>/dev/null |
-            $decompressor 2>/dev/null | strings)")
+        version=$(parse_bootloader_version "$(dd if="$device" bs="$((offset + 24))" skip=1 2>/dev/null |
+            xz -dc --single-stream --format=raw --lzma2=dict=1MiB 2>/dev/null | strings)")
         [ -n "$version" ] && {
             echo "$version"
             return
@@ -1130,6 +1115,7 @@ ota_update() {
   if [ "$ota_mode" = "keenboot" ]; then
     arch=$(get_architecture)
     [ "$arch" != "mipsel" ] || is_uboot_writable || return 1
+    packages_checker "xz"
     ota_path="/files/keenboot/$arch"
   else
     ota_path="/osvault"
