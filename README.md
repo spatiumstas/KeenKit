@@ -1,9 +1,7 @@
 # KeenKit
 ### Многофункциональный скрипт, упрощающий взаимодействие с роутером на базе KeeneticOS
 
-<img width="682" height="570" alt="image" src="https://github.com/user-attachments/assets/58754ff8-587d-4eb3-b29e-48810acca134" />
-
-
+<img width="682" height="570" alt="image" src="https://github.com/user-attachments/assets/80ab80d6-b606-429f-b46b-0623c1669f74" />
 
 # Установка
 1. Подключиться по `SSH` к [Entware](https://keen-prt.github.io/wiki/helpful/entware)

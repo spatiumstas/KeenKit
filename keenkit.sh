@@ -14,7 +14,7 @@ TMP_DIR="/tmp"
 OPT_DIR="/opt"
 CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.9.3"
+SCRIPT_VERSION="2.9.4"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -1046,9 +1046,9 @@ save_ota_domain() {
 ota_request() {
   local url="$1"
   shift
-  if ! curl -fLs --basic "$url" "$@"; then
+  if ! curl -fLsS --basic --max-time 7 "$url" "$@"; then
     url=$(printf '%s' "$url" | sed 's/%/%%/g')
-    print_message "Не удалось получить: $url" "$RED" >&2
+    print_message "Не удалось загрузить: $url" "$RED" >&2
     return 1
   fi
 }
@@ -1096,13 +1096,17 @@ show_progress() {
   local progress=0
   local file_path="$2"
   local file_name="$3"
+  local stop_requested=false final_update
+  trap 'stop_requested=true' TERM
 
   while [ "$downloaded" -lt "$total_size" ]; do
+    final_update="$stop_requested"
     if [ -f "$file_path" ]; then
       downloaded=$(ls -l "$file_path" | awk '{print $5}')
       progress=$((downloaded * 100 / total_size))
       printf "\rЗагрузка $file_path... (%d%%)" "$progress"
     fi
+    [ "$final_update" = true ] && break
     sleep 1
   done
   printf "\n"
@@ -1192,7 +1196,7 @@ ota_update() {
     fi
     file_url="$osvault/$DIR_ENCODED/$FILE_ENCODED"
     md5_url="$osvault/$DIR_ENCODED/md5sum"
-    total_size=$(ota_request "$file_url" -I 2>/dev/null | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
+    total_size=$(ota_request "$file_url" -I | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     if ! echo "$total_size" | grep -qE '^[0-9]+$' || [ "$total_size" -le 0 ]; then
       print_message "Не удалось определить размер файла: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
       exit_function
