@@ -14,7 +14,7 @@ TMP_DIR="/tmp"
 OPT_DIR="/opt"
 CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.9.4"
+SCRIPT_VERSION="2.9.5"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
 PACKAGES_LIST="python3-base python3 python3-light libpython3"
@@ -829,13 +829,16 @@ select_drive() {
 
   if ! parsed_output=$(printf '%s\n' "$media_output" | jq -r '
     to_entries[]
-    | select(.value.bus == "usb")
+    | select(.value.bus != "mtd")
     | .value as $media
+    | (($media.manufacturer // "") | if . != "" then . else ($media.product // "") end) as $device_name
     | ($media.partition // [])[]
     | select(.state == "MOUNTED" and ((.fstype // "" | ascii_downcase) != "swap"))
     | [
         (.uuid // ""),
-        ((.label // "") | if . != "" then . elif ($media.manufacturer // "") != "" then ($media.manufacturer // "") else "Unknown" end),
+        ((.label // "") | if $device_name != "" then
+          $device_name + (if . != "" then " • " + . else "" end)
+        elif . != "" then . else "Unknown" end),
         ((.fstype // "") | ascii_upcase),
         (.total // "0"),
         (.free // "0")
@@ -853,7 +856,7 @@ select_drive() {
     used_bytes=$((total_bytes - free_bytes))
     [ "$used_bytes" -lt 0 ] && used_bytes=0
 
-    echo "$index. $display_name ($fstype, $(format_size $used_bytes $total_bytes))"
+    echo "$index. $display_name • ($fstype, $(format_size $used_bytes $total_bytes))"
     if [ -n "$uuids" ]; then
       uuids="$uuids
 $uuid"
@@ -916,22 +919,24 @@ backup_config() {
     case "$user_input" in
     y | Y)
       echo ""
-      select_drive "Выберите накопитель для бэкапа:"
+      select_drive "Выберите накопитель для бэкапа:" || return 1
 
       if [ -n "$selected_drive" ]; then
         local device_uuid=$(echo "$selected_drive" | awk -F'/' '{print $NF}')
         local folder_path="$device_uuid:/backup$DATE"
         local backup_file="$folder_path/$(get_hw_id)_$(get_fw_version)_startup-config.txt"
-        mkdir -p "$selected_drive/backup$DATE"
+        mkdir "$selected_drive/backup$DATE" || return 1
         rci_parse "copy startup-config $backup_file" >/dev/null 2>&1
 
         if [ $? -eq 0 ]; then
           print_message "Startup-config сохранен в $backup_file" "$GREEN"
         else
           print_message "Ошибка при сохранении бэкапа" "$RED"
+          return 1
         fi
       else
         echo "Бэкап не выполнен, накопитель не выбран."
+        return 1
       fi
       ;;
     *)
@@ -1388,7 +1393,7 @@ update_firmware_block() {
     fi
   fi
 
-  backup_config
+  backup_config || return 1
   if get_ndm_storage; then
     update_firmware_legacy "$firmware" "$use_mount"
   else
@@ -1427,7 +1432,7 @@ firmware_manual_update() {
     selected_drive="$STORAGE_DIR"
     use_mount=true
   else
-    select_drive "Выберите накопитель с размещённым файлом обновления:"
+    select_drive "Выберите накопитель с размещённым файлом обновления:" || return 1
     use_mount=false
   fi
 
@@ -1490,7 +1495,7 @@ firmware_manual_update() {
 }
 
 backup_block() {
-  select_drive "Выберите накопитель для бэкапа:"
+  select_drive "Выберите накопитель для бэкапа:" || return 1
   mtd_output=$(cat /proc/mtd)
   printf "\n${GREEN}Доступные разделы:${NC}\n"
   echo "$mtd_output" | awk 'NR>1 {print $0}'
@@ -1514,7 +1519,7 @@ backup_block() {
     for i in $(seq 0 $(($output_all_mtd - 1))); do
       mtd_name=$(echo "$mtd_output" | awk -v i=$i 'NR==i+2 {gsub(/"/, "", $4); print $4}')
       if [ $valid_parts -eq 0 ]; then
-        mkdir -p "$folder_path"
+        mkdir "$folder_path" || return 1
         valid_parts=1
       fi
 
@@ -1537,7 +1542,7 @@ backup_block() {
       selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {gsub(/"/, "", $4); print $4}')
 
       if [ $valid_parts -eq 0 ]; then
-        mkdir -p "$folder_path"
+        mkdir "$folder_path" || return 1
         valid_parts=1
       fi
 
@@ -1566,7 +1571,7 @@ backup_block() {
 
 backup_entware() {
   packages_checker "tar libacl"
-  select_drive "Выберите накопитель:"
+  select_drive "Выберите накопитель:" || return 1
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
   spinner_start "Выполняю копирование"
   tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" --exclude="$(basename "$backup_file")" . 2>&1)
@@ -1586,7 +1591,7 @@ backup_entware() {
 
 rewrite_block() {
   check_host
-  select_drive "Выберите накопитель с размещённым файлом:"
+  select_drive "Выберите накопитель с размещённым файлом:" || return 1
   files=$(find_files "$selected_drive" "60k")
   count=$(echo "$files" | wc -l)
   if [ -z "$files" ]; then

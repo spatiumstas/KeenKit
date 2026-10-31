@@ -8,7 +8,7 @@
 
 2. Установить скрипт
 ```
-opkg update && opkg install curl && curl -L -s "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/install.sh" > /tmp/install.sh && sh /tmp/install.sh
+opkg update && opkg install curl && curl -fLsS "https://raw.githubusercontent.com/spatiumstas/KeenKit/main/install.sh" > /tmp/install.sh && sh /tmp/install.sh
 ```
 Запуск через:
 >`keenkit` или `/opt/keenkit.sh`
