@@ -29,7 +29,7 @@ packages_checker() {
 }
 
 packages_checker curl tar findutils jq libcurl
-curl -L -s "https://raw.githubusercontent.com/spatiumstas/$REPO/$BRANCH/$SCRIPT" --output $TMP_DIR/$SCRIPT
+curl -fLsS "https://raw.githubusercontent.com/spatiumstas/$REPO/$BRANCH/$SCRIPT" --output "$TMP_DIR/$SCRIPT" || exit 1
 mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
 chmod +x $OPT_DIR/$SCRIPT
 cd $OPT_DIR/bin
