@@ -404,6 +404,11 @@ is_uboot_writable() {
 
 parse_bootloader_version() {
     local strings="$1" pattern found
+    found=$(echo "$strings" | grep -m1 '^Athena bootloader ')
+    [ -n "$found" ] && {
+        echo "$(echo "$found" | sed -e 's/,.*$//')"
+        return
+    }
     found=$(echo "$strings" | grep -m1 '^Version: (KB-')
     [ -n "$found" ] && {
         echo "KeenBOOT $(echo "$found" | sed -e 's/^Version: (//' -e 's/)$//')"
