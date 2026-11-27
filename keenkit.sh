@@ -14,10 +14,11 @@ TMP_DIR="/tmp"
 OPT_DIR="/opt"
 CONFIG_FILE="$OPT_DIR/etc/$REPO.conf"
 STORAGE_DIR="/storage"
-SCRIPT_VERSION="2.9.5"
+FS_MOUNTED=false
+unset UPDATE_FILE
+SCRIPT_VERSION="2.10"
 MIN_RAM_SIZE="256"
 MIN_RAM_SIZE_AARCH64="512"
-PACKAGES_LIST="python3-base python3 python3-light libpython3"
 DATE=$(date +%Y-%m-%d_%H-%M)
 
 print_menu() {
@@ -66,7 +67,7 @@ EOF
     echo "8. KeenBOOT OTA Update"
   fi
   printf "\n77. Change language"
-  printf "\n88. Удалить пакеты и настройки\n"
+  printf "\n88. Удалить настройки\n"
   echo "99. Обновить скрипт"
   echo "00. Выход"
   echo ""
@@ -97,7 +98,7 @@ main_menu() {
     8) ota_update "keenboot" ;;
     00) exit 0 ;;
     77) changeLanguage ;;
-    88) packages_delete ;;
+    88) settings_delete ;;
     99) script_update ;;
     *)
       echo "Неверный выбор. Попробуйте снова."
@@ -111,7 +112,7 @@ print_message() {
   local message="$1"
   local color="${2:-$NC}"
   local border=$(printf '%0.s-' $(seq 1 $((${#message} + 2))))
-  printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
+  printf '%b\n+%s+\n| %s |\n+%s+\n%b\n' "$color" "$border" "$message" "$border" "$NC"
 }
 
 print_list_with_highlight() {
@@ -144,16 +145,27 @@ rci_request() {
 }
 
 rci_parse() {
-  local body="$1"
+  local body="$1" response
+
+  ensure_jq >&2 || return 1
 
   case "$body" in
   \{* | \[*) ;;
-  *) body="[{\"parse\":\"$body\"}]" ;;
+  *) body=$(jq -cn --arg command "$body" '[{parse: $command}]') || return 1 ;;
   esac
 
-  curl -fsS -H "Content-Type: application/json" \
+  response=$(curl -fsS -H "Content-Type: application/json" \
     -d "$body" \
-    "http://127.0.0.1:79/rci/"
+    "http://127.0.0.1:79/rci/") || return 1
+  if ! printf '%s\n' "$response" | jq -e '
+    (type == "object" or type == "array") and
+    ([.. | objects | .status? | select(type == "array") | .[]
+      | objects | select(.status == "error")] | length == 0)
+  ' >/dev/null; then
+    printf '%s\n' "$response" >&2
+    return 1
+  fi
+  printf '%s\n' "$response"
 }
 
 ensure_jq() {
@@ -200,11 +212,6 @@ get_ls_usage() {
   ' 2>/dev/null
 }
 
-ndmc_cli() {
-  unset LD_LIBRARY_PATH
-  ndmc -c "$@"
-}
-
 native_fwupdate() {
   local firmware="$1"
   local firmware_rci_path response
@@ -233,7 +240,7 @@ check_update() {
   response=$(curl -s --max-time 1 "https://api.github.com/repos/$USERNAME/$REPO/releases/latest")
   REMOTE_VERSION=$(json_get_value "$response" '.tag_name')
   [ -z "$REMOTE_VERSION" ] && return
-  [ "$REMOTE_VERSION" != "$SCRIPT_VERSION" ] && printf " | ${GREEN}Доступно $REMOTE_VERSION${NC}"
+  [ "$REMOTE_VERSION" != "$SCRIPT_VERSION" ] && printf " | ${GREEN}Доступно %s${NC}" "$REMOTE_VERSION"
 }
 
 get_device() {
@@ -464,6 +471,7 @@ copy_dual_config() {
     dst_cfg_slot="$cfg_slot1"
     ;;
   *)
+    return 1
     ;;
   esac
 
@@ -480,13 +488,7 @@ copy_dual_config() {
   esac
 
   print_message "Копирую конфигурацию: Config_$current_slot → Config_$new_slot" "$CYAN"
-  dd_output=$(dd if="$src_dev" of="$dst_dev" 2>&1 | tee /dev/tty)
-  if echo "$dd_output" | grep -iq "error\|can't"; then
-    print_message "Ошибка при копировании конфигурации" "$RED"
-    return 1
-  fi
-
-  return 0
+  run_dd if="$src_dev" of="$dst_dev"
 }
 
 change_boot_slot() {
@@ -540,7 +542,7 @@ switch_boot_slot() {
 }
 
 get_ndm_storage() {
-  strings /lib/modules/4.9-ndm-5/ndm_storage.ko 2>/dev/null | grep -q "Firmware_2"
+  strings "/lib/modules/$(uname -r)/ndm_storage.ko" 2>/dev/null | grep -q "Firmware_2"
 }
 
 get_architecture() {
@@ -666,14 +668,19 @@ get_mtd_index_by_name() {
   grep -w "$name" /proc/mtd | awk -F: '{print $1}' | grep -oE '[0-9]+'
 }
 
-get_host() {
-  [ "$(json_get_value "${1:-$(rci_request "show/ndss")}" '.host')" = "127.0.0.1" ]
+get_mtd_name_by_index() {
+  local index="$1"
+  case "$index" in
+  '' | *[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$2" | awk -v device="mtd$index:" '
+    $1 == device {gsub(/"/, "", $4); print $4; found=1; exit}
+    END {exit !found}
+  '
 }
 
-check_host() {
-  if ! get_host; then
-    main_menu
-  fi
+get_host() {
+  [ "$(json_get_value "${1:-$(rci_request "show/ndss")}" '.host')" = "127.0.0.1" ]
 }
 
 spinner_start() {
@@ -707,7 +714,6 @@ spinner_stop() {
 
 packages_checker() {
   local packages="$1"
-  local flag="$2"
   local missing=""
   local installed
   installed=$(opkg list-installed 2>/dev/null)
@@ -721,40 +727,24 @@ packages_checker() {
   if [ -n "$missing" ]; then
     print_message "Устанавливаем:$missing" "$GREEN"
     opkg update >/dev/null 2>&1
-    opkg install $missing $flag
+    opkg install $missing
     echo ""
   fi
 }
 
-packages_delete() {
-  delete_log=$(opkg remove $PACKAGES_LIST --autoremove 2>&1)
-  removed_packages=""
-  failed_packages=""
-
-  for package in $PACKAGES_LIST; do
-    if echo "$delete_log" | grep -q "Removing package $package"; then
-      removed_packages="$removed_packages $package"
-    elif echo "$delete_log" | grep -q "Package $package is depended upon by packages"; then
-      failed_packages="$failed_packages $package"
-    fi
-  done
-
-  if [ -n "$removed_packages" ]; then
-    print_message "Пакеты успешно удалены:$removed_packages" "$GREEN"
-  fi
-
-  if [ -n "$failed_packages" ]; then
-    print_message "Следующие пакеты не были удалены из-за зависимостей:$failed_packages" "$RED"
-  fi
-
-  if [ -z "$removed_packages" ] && [ -z "$failed_packages" ]; then
-    print_message "Используемые пакеты не установлены" "$CYAN"
-  fi
+settings_delete() {
   if [ -f "$CONFIG_FILE" ]; then
     rm -f "$CONFIG_FILE"
     print_message "Файл удален: $CONFIG_FILE" "$CYAN"
   fi
   exit_function
+}
+
+run_dd() {
+  if ! dd "$@"; then
+    print_message "Ошибка копирования данных. Воспользуйтесь загрузчиком" "$RED" >&2
+    return 1
+  fi
 }
 
 perform_dd() {
@@ -764,45 +754,67 @@ perform_dd() {
   checking_mtd_size "$input_file" "$output_file" || return 1
   sync
   echo 3 >/proc/sys/vm/drop_caches || true
-  output=$(dd if="$input_file" of="$output_file" conv=fsync 2>&1 | tee /dev/tty)
-
-  if echo "$output" | grep -iq "error\|can't"; then
-    print_message "Ошибка при перезаписи раздела. Воспользуйтесь загрузчиком" "$RED"
-    umountFS
-    exit_function
-  fi
+  run_dd if="$input_file" of="$output_file" conv=fsync
 }
 
 checking_mtd_size() {
   local input_file="$1"
   local output_file="$2"
 
-  if echo "$output_file" | grep -qE '^/dev/mtdblock[0-9]+'; then
+  case "$output_file" in
+  /dev/mtd*)
+    if ! echo "$output_file" | grep -qE '^/dev/mtd(block)?[0-9]+$' ||
+       ! { [ -b "$output_file" ] || [ -c "$output_file" ]; }; then
+      print_message "Раздел не найден: $output_file" "$RED" >&2
+      return 1
+    fi
     local mtd_index
     mtd_index=$(echo "$output_file" | grep -oE '[0-9]+$')
-    [ -n "$mtd_index" ] || return 0
+    [ -n "$mtd_index" ] || return 1
 
     local line size_hex part_size file_size
     line=$(grep "^mtd${mtd_index}:" /proc/mtd 2>/dev/null)
-    [ -n "$line" ] || return 0
+    [ -n "$line" ] || return 1
 
     set -- $line
     size_hex=$2
-    echo "$size_hex" | grep -qiE '^[0-9a-f]+$' || return 0
+    echo "$size_hex" | grep -qiE '^[0-9a-f]+$' || return 1
     part_size=$((0x$size_hex))
 
-    [ -f "$input_file" ] || return 0
+    [ -f "$input_file" ] && [ -s "$input_file" ] || return 1
     file_size=$(wc -c < "$input_file" 2>/dev/null)
-    echo "$file_size" | grep -qE '^[0-9]+$' || return 0
+    echo "$file_size" | grep -qE '^[0-9]+$' || return 1
 
     if [ "$file_size" -gt "$part_size" ]; then
       print_message "Файл больше выбранного раздела. Воспользуйтесь загрузчиком" "$RED"
-      umount /tmp >/dev/null 2>&1
-      exit_function
       return 1
     fi
-  fi
+    ;;
+  esac
   return 0
+}
+
+read_choice() {
+  local prompt="$1" min="$2" max="$3"
+  while true; do
+    if ! read -r -p "$prompt " choice; then
+      echo ""
+      exit 0
+    fi
+    choice=$(printf '%s' "$choice" | tr -d ' \n\r')
+    [ "$choice" != "00" ] || return 1
+    case "$choice" in
+    '' | *[!0-9]*) ;;
+    *)
+      choice=$(printf '%s' "$choice" | sed 's/^0*//')
+      choice=${choice:-0}
+      if [ "$choice" -ge "$min" ] 2>/dev/null && [ "$choice" -le "$max" ] 2>/dev/null; then
+        return 0
+      fi
+      ;;
+    esac
+    print_message "Неверный выбор. Выберите от $min до $max." "$RED"
+  done
 }
 
 select_drive() {
@@ -869,30 +881,15 @@ $parsed_output
 EOF
 
   exit_main_menu
-  if ! read -r -p "$message " choice; then
-    echo ""
-    exit 0
-  fi
-  choice=$(echo "$choice" | tr -d ' \n\r')
-  if [ "$choice" = "00" ]; then
-    main_menu
-  fi
+  read_choice "$message" 0 "$((index - 1))" || return 1
   echo ""
   case "$choice" in
   0) selected_drive="$TMP_DIR" ;;
   1) selected_drive="$STORAGE_DIR" ;;
   *)
-    if [ -n "$uuids" ]; then
-      selected_drive=$(printf '%s\n' "$uuids" | sed -n "$((choice - 1))p")
-      if [ -z "$selected_drive" ]; then
-        print_message "Неверный выбор" "$RED"
-        exit_function
-      fi
-      selected_drive="/tmp/mnt/$selected_drive"
-    else
-      print_message "Неверный выбор" "$RED"
-      exit_function
-    fi
+    selected_drive=$(printf '%s\n' "$uuids" | sed -n "$((choice - 1))p")
+    [ -n "$selected_drive" ] || return 1
+    selected_drive="/tmp/mnt/$selected_drive"
     ;;
   esac
 }
@@ -947,6 +944,9 @@ backup_config() {
 }
 
 exit_function() {
+  if [ "$FS_MOUNTED" = true ]; then
+    umountFS || exit 1
+  fi
   ota_cleanup
   echo ""
   if [ ! -t 0 ]; then
@@ -966,41 +966,42 @@ exit_main_menu() {
 
 script_update() {
   packages_checker "curl libcurl"
-
-  UPDATE_URLS="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT"
-
-  update_success=0
-  for url in $UPDATE_URLS; do
-    response=$(curl -fLsS --connect-timeout 5 --max-time 10 "$url" --output "$TMP_DIR/$SCRIPT" 2>&1)
-    if [ $? -eq 0 ] && [ -f "$TMP_DIR/$SCRIPT" ] && [ -s "$TMP_DIR/$SCRIPT" ]; then
-      update_success=1
-      break
-    fi
-    response=$(printf "%s\n" "$response" | head -n1)
-    print_message "Ошибка: $response" "$RED"
-    rm -f "$TMP_DIR/$SCRIPT"
-  done
-
-  if [ "$update_success" -eq 0 ]; then
+  local url="https://raw.githubusercontent.com/$USERNAME/$REPO/$BRANCH/$SCRIPT"
+  local response
+  UPDATE_FILE=$(mktemp "$OPT_DIR/$SCRIPT.XXXXXX") || { exit_function; return 1; }
+  if ! response=$(curl -fLsS --connect-timeout 5 --max-time 10 "$url" --output "$UPDATE_FILE" 2>&1) ||
+     [ ! -s "$UPDATE_FILE" ]; then
+    rm -f "$UPDATE_FILE"
+    unset UPDATE_FILE
     print_message "Не удалось загрузить обновление" "$RED"
+    [ -z "$response" ] || printf '%s\n' "$response" >&2
     exit_function
+    return 1
   fi
-
-  mv "$TMP_DIR/$SCRIPT" "$OPT_DIR/$SCRIPT"
-  chmod +x "$OPT_DIR/$SCRIPT"
+  if ! sh -n "$UPDATE_FILE" || ! chmod 755 "$UPDATE_FILE" || ! mv "$UPDATE_FILE" "$OPT_DIR/$SCRIPT"; then
+    rm -f "$UPDATE_FILE"
+    unset UPDATE_FILE
+    print_message "Не удалось установить обновление" "$RED"
+    exit_function
+    return 1
+  fi
+  unset UPDATE_FILE
   print_message "Скрипт успешно обновлён" "$GREEN"
   sleep 1
   exec "$OPT_DIR/$SCRIPT"
 }
 
 mountFS() {
-  mount -t tmpfs tmpfs /tmp
+  [ "$FS_MOUNTED" != true ] || return 0
+  mount -t tmpfs tmpfs /tmp || return 1
+  FS_MOUNTED=true
   print_message "LockFS: true"
 }
 
 umountFS() {
   sleep 1
-  umount /tmp
+  umount /tmp || return 1
+  unset FS_MOUNTED
   print_message "UnlockFS: true"
 }
 
@@ -1052,7 +1053,6 @@ ota_request() {
   local url="$1"
   shift
   if ! curl -fLsS --basic --max-time 7 "$url" "$@"; then
-    url=$(printf '%s' "$url" | sed 's/%/%%/g')
     print_message "Не удалось загрузить: $url" "$RED" >&2
     return 1
   fi
@@ -1066,6 +1066,7 @@ ota_cleanup() {
   fi
   if [ -n "$DOWNLOAD_PATH" ] && [ -n "$FILE" ]; then
     rm -f "$DOWNLOAD_PATH/$FILE" "$DOWNLOAD_PATH/md5sum"
+    rmdir "$DOWNLOAD_PATH"
   fi
   unset DOWNLOAD_PATH FILE
 }
@@ -1079,7 +1080,7 @@ uboot_write_aarch64() {
       return 1
     fi
     if [ ! -s "$TMP_DIR/$file" ]; then
-      print_message "Файл пуст или не был загружен: $(printf '%s' "$base/$file" | sed 's/%/%%/g')" "$RED"
+      print_message "Файл пуст или не был загружен: $base/$file" "$RED"
       rm -f "$module" "$writer"
       return 1
     fi
@@ -1100,7 +1101,6 @@ show_progress() {
   local downloaded=0
   local progress=0
   local file_path="$2"
-  local file_name="$3"
   local stop_requested=false final_update
   trap 'stop_requested=true' TERM
 
@@ -1109,7 +1109,7 @@ show_progress() {
     if [ -f "$file_path" ]; then
       downloaded=$(ls -l "$file_path" | awk '{print $5}')
       progress=$((downloaded * 100 / total_size))
-      printf "\rЗагрузка $file_path... (%d%%)" "$progress"
+      printf '\rЗагрузка %s... (%d%%)' "$file_path" "$progress"
     fi
     [ "$final_update" = true ] && break
     sleep 1
@@ -1118,8 +1118,8 @@ show_progress() {
 }
 
 ota_update() {
-  check_host
-  local ota_mode="${1:-firmware}" arch domain ota_path osvault file_url md5_url
+  get_host || return 1
+  local ota_mode="${1:-firmware}" arch domain ota_path osvault file_url md5_url download_root
   packages_checker "curl findutils libcurl"
   if [ "$ota_mode" = "keenboot" ]; then
     arch=$(get_architecture)
@@ -1135,7 +1135,7 @@ ota_update() {
     if REQUEST=$(ota_request "$osvault"); then
       DIRS=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -E '^[^/?#]+/$' | grep -vE '^\.\.?/$' | sed 's|/$||' | sed 's|%20| |g')
       [ -z "$DIRS" ] || break
-      print_message "Не найдены каталоги OTA: $(printf '%s' "$osvault" | sed 's/%/%%/g')" "$RED"
+      print_message "Не найдены каталоги OTA: $osvault" "$RED"
     fi
     domain=$(get_ota_domain new) || { exit_function; return 1; }
   done
@@ -1145,79 +1145,54 @@ ota_update() {
   print_list_with_highlight "$DIRS" "$current_device_model"
   exit_main_menu
   dir_count=$(echo "$DIRS" | wc -l)
-  while true; do
-    if ! read -r -p "Выберите папку (от 1 до $dir_count): " DIR_NUM; then
-      echo ""
-      exit 0
-    fi
-    if [ "$DIR_NUM" = "00" ]; then
-      main_menu
-    fi
-    if echo "$DIR_NUM" | grep -qE '^[0-9]+$' && [ "$DIR_NUM" -ge 1 ] && [ "$DIR_NUM" -le "$dir_count" ]; then
-      break
-    else
-      print_message "Неверный выбор. Выберите от 1 до $dir_count." "$RED"
-    fi
-  done
-  DIR=$(echo "$DIRS" | sed -n "${DIR_NUM}p")
+  read_choice "Выберите папку (от 1 до $dir_count):" 1 "$dir_count" || return 1
+  DIR=$(echo "$DIRS" | sed -n "${choice}p")
   DIR_ENCODED=$(echo "$DIR" | sed 's/ /%20/g')
 
   REQUEST=$(ota_request "$osvault/$DIR_ENCODED/") || { exit_function; return 1; }
   BIN_FILES=$(echo "$REQUEST" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep '\.bin$' | sed 's|%20| |g')
 
   if [ -z "$BIN_FILES" ]; then
-    print_message "В директории $(printf '%s' "$osvault/$DIR_ENCODED/" | sed 's/%/%%/g') нет файлов." "$RED"
+    print_message "В директории $osvault/$DIR_ENCODED/ нет файлов." "$RED"
     exit_function
   else
-    printf "\nВерсии для $DIR:\n"
+    printf '\nВерсии для %s:\n' "$DIR"
     print_list_with_highlight "$BIN_FILES" "$current_device_model"
     exit_main_menu
     file_count=$(echo "$BIN_FILES" | wc -l)
-    while true; do
-      if ! read -r -p "Выберите версию (от 1 до $file_count): " FILE_NUM; then
-        echo ""
-        exit 0
-      fi
-      if [ "$FILE_NUM" = "00" ]; then
-        unset FILE
-        unset DOWNLOAD_PATH
-        unset use_mount
-        unset progress_pid
-        main_menu
-        return
-      fi
-      if echo "$FILE_NUM" | grep -qE '^[0-9]+$' && [ "$FILE_NUM" -ge 1 ] && [ "$FILE_NUM" -le "$file_count" ]; then
-        break
-      else
-        print_message "Неверный выбор. Выберите от 1 до $file_count." "$RED"
-      fi
-    done
-    FILE=$(echo "$BIN_FILES" | sed -n "${FILE_NUM}p")
+    read_choice "Выберите версию (от 1 до $file_count):" 1 "$file_count" || return 1
+    FILE=$(echo "$BIN_FILES" | sed -n "${choice}p")
     FILE_ENCODED=$(echo "$FILE" | sed 's/ /%20/g')
 
     if [ -z "$FILE" ]; then
       print_message "Файл не выбран" "$RED"
       exit_function
     fi
+    case "$FILE" in
+    */*)
+      print_message "Недопустимое имя файла OTA" "$RED"
+      return 1
+      ;;
+    esac
     file_url="$osvault/$DIR_ENCODED/$FILE_ENCODED"
     md5_url="$osvault/$DIR_ENCODED/md5sum"
     total_size=$(ota_request "$file_url" -I | grep -i content-length | tail -n 1 | awk '{print $2}' | tr -d '\r')
     if ! echo "$total_size" | grep -qE '^[0-9]+$' || [ "$total_size" -le 0 ]; then
-      print_message "Не удалось определить размер файла: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
+      print_message "Не удалось определить размер файла: $file_url" "$RED"
       exit_function
     fi
     total_size_mb=$((total_size / 1024 / 1024))
     free_space_mb=$(get_internal_storage_size free)
     if [ -n "$free_space_mb" ] && [ "$free_space_mb" -ge "$total_size_mb" ]; then
-      DOWNLOAD_PATH="$STORAGE_DIR"
+      download_root="$STORAGE_DIR"
       use_mount=true
     else
-      DOWNLOAD_PATH="$TMP_DIR"
+      download_root="$TMP_DIR"
       use_mount=false
     fi
-    mkdir -p "$DOWNLOAD_PATH"
+    DOWNLOAD_PATH=$(mktemp -d "$download_root/keenkit.XXXXXX") || return 1
     echo ""
-    show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" "$FILE" &
+    show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" &
     progress_pid=$!
     if ! ota_request "$file_url" --output "$DOWNLOAD_PATH/$FILE"; then
       kill "$progress_pid" 2>/dev/null
@@ -1230,7 +1205,7 @@ ota_update() {
     wait "$progress_pid" 2>/dev/null
     unset progress_pid
     if [ ! -s "$DOWNLOAD_PATH/$FILE" ]; then
-      print_message "Файл пуст или не был загружен: $(printf '%s' "$file_url" | sed 's/%/%%/g')" "$RED"
+      print_message "Файл пуст или не был загружен: $file_url" "$RED"
       exit_function
       return 1
     fi
@@ -1254,7 +1229,7 @@ ota_update() {
       print_message "Внимание! Обновление загрузчика опасная процедура, может привести к неработоспособности устройства!" "$RED"
     fi
     printf "${GREEN}MD5 хеш совпадает${NC}\n\n"
-    read -p "$(printf "Выбран ${GREEN}$FILE${NC} для обновления, всё верно? (y/n) ")" CONFIRM
+    read -p "$(printf "Выбран ${GREEN}%s${NC} для обновления, всё верно? (y/n) " "$FILE")" CONFIRM
     case "$CONFIRM" in
     y | Y)
       if [ "$ota_mode" = "keenboot" ]; then
@@ -1285,7 +1260,6 @@ ota_update() {
       fi
       if [ "$update_rc" -ne 2 ]; then
         if [ "$update_rc" -ne 0 ]; then
-          print_message "Обновление завершилось с ошибкой" "$RED"
           exit_function
         fi
         if [ "$ota_mode" = "keenboot" ]; then
@@ -1306,8 +1280,9 @@ ota_update() {
 update_firmware_legacy() {
   local firmware="$1"
   local use_mount="$2"
+  local wrote_partition=false
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
-    mountFS
+    mountFS || return 1
   fi
 
   for partition in Firmware Firmware_1 Firmware_2; do
@@ -1318,12 +1293,20 @@ update_firmware_legacy() {
     [ -z "$mtd_index" ] && continue
 
     echo "Обновляю $partition..."
-    perform_dd "$firmware" "/dev/mtdblock$mtd_index"
+    if ! perform_dd "$firmware" "/dev/mtdblock$mtd_index"; then
+      [ "$FS_MOUNTED" != true ] || umountFS
+      return 1
+    fi
+    wrote_partition=true
     echo ""
   done
 
   if [ "$use_mount" = true ] || [[ "$firmware" == *"$STORAGE_DIR"* ]]; then
-    umountFS
+    umountFS || return 1
+  fi
+  if [ "$wrote_partition" != true ]; then
+    print_message "Разделы прошивки не найдены" "$RED"
+    return 1
   fi
 }
 
@@ -1359,7 +1342,8 @@ update_firmware_dual() {
     print_message "Прошивка успешно обновлена. Перезагрузка устройства..." "$GREEN"
     return 2
   fi
-  perform_dd "$firmware" "/dev/mtdblock$target_fw_slot"
+  [ -n "$target_fw_slot" ] || return 1
+  perform_dd "$firmware" "/dev/mtdblock$target_fw_slot" || return 1
 
   if ! copy_dual_config "$current_slot" "$new_slot"; then
     print_message "Ошибка при копировании конфигурации, слот не будет переключён на $new_slot." "$RED"
@@ -1387,8 +1371,7 @@ update_firmware_block() {
       confirm=$(echo "$confirm" | tr -d ' \n\r')
       case "$confirm" in
       y | Y) ;;
-      n | N) exit_function ;;
-      *) ;;
+      *) exit_function; return 1 ;;
       esac
     fi
   fi
@@ -1404,23 +1387,11 @@ update_firmware_block() {
 find_files() {
   local search_path="$1"
   local min_size="$2"
-  local exclude_pattern="$3"
-
+  set -- "$search_path" -name '*.bin' -size +"$min_size"
   if [ "$search_path" = "$TMP_DIR" ]; then
-    if [ -n "$exclude_pattern" ]; then
-      find "$search_path" -name '*.bin' -size +"$min_size" -not -path '*/mnt/*' -not -path "$exclude_pattern"
-      return
-    fi
-    find "$search_path" -name '*.bin' -size +"$min_size" -not -path '*/mnt/*'
-    return
+    set -- "$@" -not -path '*/mnt/*'
   fi
-
-  if [ -n "$exclude_pattern" ]; then
-    find "$search_path" -name '*.bin' -size +"$min_size" -not -path "$exclude_pattern"
-    return
-  fi
-
-  find "$search_path" -name '*.bin' -size +"$min_size"
+  find "$@"
 }
 
 firmware_manual_update() {
@@ -1446,20 +1417,12 @@ firmware_manual_update() {
 
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
   exit_main_menu
-  read -p "Выберите файл обновления (от 1 до $count): " choice
-  choice=$(echo "$choice" | tr -d ' \n\r')
-  if [ "$choice" = "00" ]; then
-    main_menu
-  fi
-  if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
-    print_message "Неверный выбор файла" "$RED"
-    exit_function
-  fi
+  read_choice "Выберите файл обновления (от 1 до $count):" 1 "$count" || return 1
 
-  Firmware=$(echo "$files" | awk "NR==$choice")
+  Firmware=$(echo "$files" | awk -v number="$choice" 'NR == number')
   FirmwareName=$(basename "$Firmware")
   echo ""
-  read -p "$(printf "Выбран ${GREEN}$FirmwareName${NC} для обновления, всё верно? (y/n) ")" item_rc1
+  read -p "$(printf "Выбран ${GREEN}%s${NC} для обновления, всё верно? (y/n) " "$FirmwareName")" item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
@@ -1469,7 +1432,6 @@ firmware_manual_update() {
       exit 0
     fi
     if [ "$update_rc" -ne 0 ]; then
-      print_message "Обновление завершилось с ошибкой" "$RED"
       exit_function
     fi
     print_message "Прошивка успешно обновлена" "$GREEN"
@@ -1491,7 +1453,6 @@ firmware_manual_update() {
     reboot
     ;;
   esac
-  main_menu
 }
 
 backup_block() {
@@ -1502,12 +1463,12 @@ backup_block() {
   printf "99. Бэкап всех разделов${NC}\n"
   exit_main_menu
   folder_path="$selected_drive/backup$DATE"
-  read -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice
+  read -r -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice || return 1
   echo ""
   choice=$(echo "$choice" | tr -d '\n\r')
 
   if [ "$choice" = "00" ]; then
-    main_menu
+    return 0
   fi
 
   error_occurred=0
@@ -1515,9 +1476,8 @@ backup_block() {
   valid_parts=0
 
   if [ "$choice" = "99" ]; then
-    output_all_mtd=$(cat /proc/mtd | grep -c "mtd")
-    for i in $(seq 0 $(($output_all_mtd - 1))); do
-      mtd_name=$(echo "$mtd_output" | awk -v i=$i 'NR==i+2 {gsub(/"/, "", $4); print $4}')
+    for i in $(printf '%s\n' "$mtd_output" | awk -F: '/^mtd[0-9]+:/ {sub(/^mtd/, "", $1); print $1}'); do
+      mtd_name=$(get_mtd_name_by_index "$i" "$mtd_output") || return 1
       if [ $valid_parts -eq 0 ]; then
         mkdir "$folder_path" || return 1
         valid_parts=1
@@ -1534,12 +1494,10 @@ backup_block() {
     done
   else
     for part in $choice; do
-      if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
+      if ! selected_mtd=$(get_mtd_name_by_index "$part" "$mtd_output"); then
         non_existent_parts="$non_existent_parts $part"
         continue
       fi
-
-      selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {gsub(/"/, "", $4); print $4}')
 
       if [ $valid_parts -eq 0 ]; then
         mkdir "$folder_path" || return 1
@@ -1578,7 +1536,10 @@ backup_entware() {
   rc=$?
 
   log_operation=$(echo "$tar_output" | tail -n 2)
-  if echo "$log_operation" | grep -iq "error\|no space left on device"; then
+  if [ "$rc" -eq 1 ] && tar tzf "$backup_file" >/dev/null; then
+    rc=0
+  fi
+  if [ "$rc" -ne 0 ]; then
     spinner_stop 1
     print_message "Ошибка при создании бэкапа:" "$RED"
     echo "$log_operation"
@@ -1590,7 +1551,7 @@ backup_entware() {
 }
 
 rewrite_block() {
-  check_host
+  get_host || return 1
   select_drive "Выберите накопитель с размещённым файлом:" || return 1
   files=$(find_files "$selected_drive" "60k")
   count=$(echo "$files" | wc -l)
@@ -1601,53 +1562,42 @@ rewrite_block() {
   echo "Найдены файлы:"
   echo "$files" | sed "s|$selected_drive/||" | awk '{print NR".", $0}'
   exit_main_menu
-  read -p "Выберите файл для замены: " choice
-  choice=$(echo "$choice" | tr -d ' \n\r')
-  if [ "$choice" = "00" ]; then
-    main_menu
-  fi
-  if [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
-    print_message "Неверный выбор файла" "$RED"
-    exit_function
-  fi
+  read_choice "Выберите файл для замены:" 1 "$count" || return 1
 
-  mtdFile=$(echo "$files" | awk "NR==$choice")
+  mtdFile=$(echo "$files" | awk -v number="$choice" 'NR == number')
   mtdName=$(basename "$mtdFile")
   echo ""
   mtd_output=$(cat /proc/mtd)
   echo "$mtd_output" | awk 'NR>1 {print $0}'
   exit_main_menu
-  read -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice
+  read -r -p "Укажите номер(а) раздела(ов) разделив пробелами: " choice || return 1
   choice=$(echo "$choice" | tr -d '\n\r')
 
   if [ "$choice" = "00" ]; then
-    main_menu
+    return 0
   fi
 
   error_occurred=0
   non_existent_parts=""
-  valid_parts=0
   arch="$(get_architecture)"
 
   for part in $choice; do
-    if ! echo "$mtd_output" | awk -v i=$part 'NR==i+2 {print $1}' | grep -q "mtd$part"; then
+    if ! selected_mtd=$(get_mtd_name_by_index "$part" "$mtd_output"); then
       non_existent_parts="$non_existent_parts $part"
       continue
     fi
-
-    selected_mtd=$(echo "$mtd_output" | awk -v i=$part 'NR==i+2 {gsub(/"/, "", $4); print $4}')
 
     if [ "$selected_mtd" = "U-Boot" ]; then
       print_message "Внимание! Перезапись загрузчика опасная процедура, может привести к неработоспособности устройства!" "$RED"
     fi
 
     echo ""
-    read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd$part.$selected_mtd${NC} вашим ${GREEN}$mtdName${NC}? (y/n) ")" item_rc1
+    read -r -p "$(printf "Перезаписать раздел ${CYAN}mtd%s.%s${NC} вашим ${GREEN}%s${NC}? (y/n) " "$part" "$selected_mtd" "$mtdName")" item_rc1
     item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
     case "$item_rc1" in
     y | Y)
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
-        mountFS
+        mountFS || return 1
       fi
 
       if [ "$selected_mtd" = "U-Boot" ] && [ "$arch" = "aarch64" ]; then
@@ -1667,7 +1617,7 @@ rewrite_block() {
       fi
 
       if [[ "$mtdFile" == *"$STORAGE_DIR"* ]]; then
-        umountFS
+        umountFS || return 1
       fi
       ;;
     n | N)
@@ -1698,44 +1648,144 @@ rewrite_block() {
   exit_function
 }
 
+prepare_service_data() (
+  local input_file="$1" target="${2:-}" work_dir name offset length original new_value
+  local chars random_length random_value date_code suffix output_file
+  export LC_ALL=C
+  case "$target" in
+  '' | servicetag | sernumb | servicepass | country) ;;
+  *) return 1 ;;
+  esac
+  [ -f "$input_file" ] && [ -s "$input_file" ] || return 1
+  work_dir=$(mktemp -d "${input_file%/*}/service.XXXXXX") || return 1
+  trap 'rm -f "$work_dir/bytes" "$work_dir/fields" "$work_dir/image" "$work_dir/servicetag" "$work_dir/sernumb" "$work_dir/servicepass" "$work_dir/country"; rmdir "$work_dir"' EXIT
+  trap 'exit 1' HUP INT TERM
+
+  od -v -b "$input_file" > "$work_dir/bytes" || return 1
+  awk -v target="$target" '
+    function fail(message) {print message > "/dev/stderr"; bad=1; exit 1}
+    BEGIN {OFS="\t"; offset=-1}
+    {
+      for (i=2; i<=NF; i++) {
+        offset++
+        byte=substr($i, 1, 1)*64 + substr($i, 2, 1)*8 + substr($i, 3, 1)
+        if (active) {
+          if (byte == 0) {
+            size=length(value)
+            if (!size || (name == "country" && size != 2) ||
+                (name == "sernumb" && size < 4) ||
+                (name in sizes && sizes[name] != size))
+              fail("Invalid service field length: " name)
+            print name, start, size, value
+            sizes[name]=size
+            found=1
+            active=0
+            tail=""
+          } else {
+            if (byte < 32 || byte > 126) fail("Invalid service field: " name)
+            value=value sprintf("%c", byte)
+          }
+        } else {
+          if (byte < 32 || byte > 126) {tail=""; continue}
+          tail=tail sprintf("%c", byte)
+          if (length(tail) > 12) tail=substr(tail, length(tail)-11)
+          if (match(tail, /(servicetag|sernumb|servicepass|country)=$/)) {
+            name=substr(tail, RSTART, RLENGTH-1)
+            if (target == "" || target == name) {
+              active=1
+              start=offset+1
+              value=""
+            }
+          }
+        }
+      }
+    }
+    END {
+      if (bad) exit 1
+      if (active) fail("Unterminated service field: " name)
+      if (!found) fail("Service fields not found")
+    }
+  ' "$work_dir/bytes" > "$work_dir/fields" || return 1
+  cp "$input_file" "$work_dir/image" || return 1
+  while IFS=$(printf '\t') read -r name offset length original; do
+    if [ "$name" = country ] && [ "$original" = EA ]; then
+      continue
+    fi
+    if [ -f "$work_dir/$name" ]; then
+      new_value=$(cat "$work_dir/$name") || return 1
+    else
+      case "$name" in
+      country) new_value=EA ;;
+      *)
+        chars='0-9'
+        random_length="$length"
+        [ "$name" != servicepass ] || chars='A-Za-z0-9'
+        [ "$name" != sernumb ] || random_length=4
+        random_value=$(tr -dc "$chars" </dev/urandom | head -c "$random_length") || return 1
+        [ "${#random_value}" -eq "$random_length" ] || return 1
+        new_value="$random_value"
+        if [ "$name" = sernumb ]; then
+          new_value="$original"
+          date_code=$(date +%Y:%y%V) || return 1
+          case "$date_code" in
+          1970:*) ;;
+          [0-9][0-9][0-9][0-9]:[0-9][0-9][0-9][0-9])
+            if [ "$length" -ge 5 ]; then
+              new_value="$(printf '%s' "$original" | cut -c1)${date_code#*:}$(printf '%s' "$original" | cut -c6-)"
+            fi
+            ;;
+          *) return 1 ;;
+          esac
+          new_value="${new_value%????}$random_value"
+        fi
+        ;;
+      esac
+      printf '%s' "$new_value" > "$work_dir/$name" || return 1
+    fi
+    [ "${#new_value}" -eq "$length" ] || return 1
+    printf '%s' "$new_value" | dd of="$work_dir/image" bs=1 seek="$offset" conv=notrunc 2>/dev/null || return 1
+  done < "$work_dir/fields"
+  [ "$(wc -c < "$input_file")" -eq "$(wc -c < "$work_dir/image")" ] || return 1
+  suffix="${target:-new}"
+  [ ! -f "$work_dir/servicetag" ] || suffix=$(tail -c 4 "$work_dir/servicetag") || return 1
+  output_file="${input_file%.bin}_$suffix.bin"
+  mv "$work_dir/image" "$output_file" || return 1
+  for name in servicetag sernumb servicepass country; do
+    if [ -f "$work_dir/$name" ]; then
+      printf '%s заменён на %s\n' "$name" "$(cat "$work_dir/$name")" >&2
+    fi
+  done
+  printf '%s\n' "$output_file"
+)
+
 service() {
-  check_host
+  get_host || return 1
   folder_path="$OPT_DIR/backup$DATE"
-  SCRIPT_PATH="$TMP_DIR/service.py"
   target_flag=$1
-  packages_checker "curl python3-base python3 python3-light libpython3 findutils" "--nodeps"
 
-  local service_url="$PAGES_URL/service.py"
-  curl -fLs "$service_url" --output "$SCRIPT_PATH"
-  if [ $? -ne 0 ] || ! head -n1 "$SCRIPT_PATH" | grep -q "^#\|^import\|^def\|^class"; then
-    print_message "Ошибка при получении файла: $service_url" "$RED"
-    exit_function
-  fi
-
-  mkdir -p "$folder_path"
+  mkdir -p "$folder_path" || { exit_function; return 1; }
   mtdSlot=$(get_mtd_index_by_name "U-Config")
   mtdSlot_res=$(get_mtd_index_by_name "U-Config_res")
   if [ -n "$mtdSlot" ]; then
-    perform_dd "/dev/mtd$mtdSlot" "$folder_path/U-Config.bin"
-    if [ $? -eq 0 ]; then
+    if perform_dd "/dev/mtd$mtdSlot" "$folder_path/U-Config.bin"; then
       print_message "Бэкап текущего U-Config сохранён в $folder_path" "$GREEN"
     else
       print_message "Ошибка при создании бэкапа U-Config" "$RED"
+      exit_function
+      return 1
     fi
-  fi
-
-  if [ -n "$target_flag" ]; then
-    python3 "$SCRIPT_PATH" "$folder_path/U-Config.bin" "$target_flag"
   else
-    python3 "$SCRIPT_PATH" "$folder_path/U-Config.bin"
+    print_message "Раздел U-Config не найден" "$RED"
+    exit_function
+    return 1
   fi
 
-  mtdFile=$(find "$folder_path" -type f -name 'U-Config_*.bin' | head -n 1)
-  if [ -n "$mtdFile" ]; then
+  if mtdFile=$(prepare_service_data "$folder_path/U-Config.bin" "$target_flag"); then
     print_message "Новые сервисные данные сохранены в $mtdFile" "$GREEN"
   else
     print_message "Не удалось подготовить новые сервисные данные" "$RED"
     exit_function
+    return 1
   fi
   read -p "Продолжить замену? (y/n) " item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
@@ -1743,17 +1793,13 @@ service() {
   y | Y)
     echo ""
     printf "${CYAN}Перезаписываю раздел...${NC}\n"
-    perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot"
+    perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot" || { exit_function; return 1; }
     if [ -n "$mtdSlot_res" ]; then
       echo ""
       printf "${CYAN}Найден второй раздел, перезаписываю...${NC}\n"
-      perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot_res"
+      perform_dd "$mtdFile" "/dev/mtdblock$mtdSlot_res" || { exit_function; return 1; }
     fi
-    if [ $? -eq 0 ]; then
-      print_message "Сервисные данные успешно заменены" "$GREEN"
-    else
-      print_message "Ошибка при выполнении замены" "$RED"
-    fi
+    print_message "Сервисные данные успешно заменены" "$GREEN"
     ;;
   esac
   read -p "Перезагрузить роутер? (y/n) " item_rc2
@@ -1789,6 +1835,10 @@ changeLanguage() {
 
 cleanup() {
   rc=$?
+  [ -z "$UPDATE_FILE" ] || rm -f "$UPDATE_FILE"
+  if [ "$FS_MOUNTED" = true ]; then
+    umountFS || rc=1
+  fi
   ota_cleanup
   if [ -n "$SPINNER_PID" ]; then
     kill "$SPINNER_PID" 2>/dev/null
