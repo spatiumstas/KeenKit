@@ -6,7 +6,7 @@
 # Installation
 1. Connect via `SSH` к [Entware](https://keen-prt.github.io/wiki/helpful/entware)
 
-2. Install Script
+2. Install the script
 ```
 opkg update && opkg install curl && curl -fLsS "https://raw.githubusercontent.com/spatiumstas/KeenKit/main-english/install.sh" > /tmp/install.sh && sh /tmp/install.sh
 ```

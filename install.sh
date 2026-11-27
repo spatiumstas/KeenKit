@@ -10,7 +10,7 @@ print_message() {
   local message="$1"
   local color="${2:-$NC}"
   local border=$(printf '%0.s-' $(seq 1 $((${#message} + 2))))
-  printf "${color}\n+${border}+\n| ${message} |\n+${border}+\n${NC}\n"
+  printf '%b\n+%s+\n| %s |\n+%s+\n%b\n' "$color" "$border" "$message" "$border" "$NC"
 }
 
 packages_checker() {
