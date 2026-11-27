@@ -487,7 +487,7 @@ copy_dual_config() {
     ;;
   esac
 
-  print_message "Copying the configuration: Config_$current_slot → Config_$new_slot" "$CYAN"
+  print_message "Copying configuration: Config_$current_slot → Config_$new_slot" "$CYAN"
   run_dd if="$src_dev" of="$dst_dev"
 }
 
@@ -524,7 +524,7 @@ switch_boot_slot() {
   print_message "Switching slots $current_slot on $new_slot" "$CYAN"
 
   if change_boot_slot; then
-    print_message "Slot successfully switched to $new_slot. A restart is required to apply." "$GREEN"
+    print_message "Slot successfully switched to $new_slot. A restart is required to apply the changes." "$GREEN"
     read -p "Restart the router? (y/n) " reboot_ans
     reboot_ans=$(echo "$reboot_ans" | tr -d ' \n\r')
     case "$reboot_ans" in
@@ -742,7 +742,7 @@ settings_delete() {
 
 run_dd() {
   if ! dd "$@"; then
-    print_message "Error copying data. Please use the uploader" "$RED" >&2
+    print_message "Error copying data. Use the uploader" "$RED" >&2
     return 1
   fi
 }
@@ -1042,7 +1042,7 @@ save_ota_domain() {
 
   if mkdir -p "${CONFIG_FILE%/*}" &&
     printf 'domain="%s"\n' "$domain" > "$CONFIG_FILE"; then
-    print_message "The domain has been saved in $CONFIG_FILE" "$GREEN"
+    print_message "The domain is saved in $CONFIG_FILE" "$GREEN"
   else
     print_message "Failed to save the domain in $CONFIG_FILE" "$RED"
     return 1
@@ -1052,7 +1052,8 @@ save_ota_domain() {
 ota_request() {
   local url="$1"
   shift
-  if ! curl -fLsS --basic --max-time 7 "$url" "$@"; then
+  if ! curl -fLsS --basic --connect-timeout 10 \
+    --max-time 15 "$url" "$@"; then
     print_message "Failed to Upload: $url" "$RED" >&2
     return 1
   fi
@@ -1194,7 +1195,7 @@ ota_update() {
     echo ""
     show_progress "$total_size" "$DOWNLOAD_PATH/$FILE" &
     progress_pid=$!
-    if ! ota_request "$file_url" --output "$DOWNLOAD_PATH/$FILE"; then
+    if ! ota_request "$file_url" --max-time 0 --speed-time 30 --output "$DOWNLOAD_PATH/$FILE"; then
       kill "$progress_pid" 2>/dev/null
       wait "$progress_pid" 2>/dev/null
       rm -f "$DOWNLOAD_PATH/$FILE"
@@ -1229,7 +1230,7 @@ ota_update() {
       print_message "Warning! Updating the bootloader is a dangerous procedure and may cause the device to malfunction.!" "$RED"
     fi
     printf "${GREEN}MD5 The hash matches${NC}\n\n"
-    read -p "$(printf "Hired! ${GREEN}%s${NC} for an update, that's right? (y/n) " "$FILE")" CONFIRM
+    read -p "$(printf "Hired! ${GREEN}%s${NC} For an update, that's right.? (y/n) " "$FILE")" CONFIRM
     case "$CONFIRM" in
     y | Y)
       if [ "$ota_mode" = "keenboot" ]; then
@@ -1367,7 +1368,7 @@ update_firmware_block() {
     local ram_size=$(get_ram_size)
     if [ "$ram_size" -lt "$MIN_RAM_SIZE_AARCH64" ]; then
       print_message "Insufficient RAM ($ram_size MB)" "$RED"
-      read -p "An update via the bootloader is recommended. Continue? (y/n) " confirm
+      read -p "Updating via the bootloader is recommended. Continue? (y/n) " confirm
       confirm=$(echo "$confirm" | tr -d ' \n\r')
       case "$confirm" in
       y | Y) ;;
@@ -1403,7 +1404,7 @@ firmware_manual_update() {
     selected_drive="$STORAGE_DIR"
     use_mount=true
   else
-    select_drive "Select the drive with the update file:" || return 1
+    select_drive "Select the drive with the update file on it:" || return 1
     use_mount=false
   fi
 
@@ -1422,7 +1423,7 @@ firmware_manual_update() {
   Firmware=$(echo "$files" | awk -v number="$choice" 'NR == number')
   FirmwareName=$(basename "$Firmware")
   echo ""
-  read -p "$(printf "Hired! ${GREEN}%s${NC} for an update, that's right? (y/n) " "$FirmwareName")" item_rc1
+  read -p "$(printf "Hired! ${GREEN}%s${NC} For an update, that's right.? (y/n) " "$FirmwareName")" item_rc1
   item_rc1=$(echo "$item_rc1" | tr -d ' \n\r')
   case "$item_rc1" in
   y | Y)
@@ -1531,7 +1532,7 @@ backup_entware() {
   packages_checker "tar libacl"
   select_drive "Select Storage Device:" || return 1
   backup_file="$selected_drive/$(get_architecture)_entware_backup_$DATE.tar.gz"
-  spinner_start "Copying"
+  spinner_start "Copying in progress"
   tar_output=$(tar cvzf "$backup_file" -C "$OPT_DIR" --exclude="$(basename "$backup_file")" . 2>&1)
   rc=$?
 
@@ -1588,7 +1589,7 @@ rewrite_block() {
     fi
 
     if [ "$selected_mtd" = "U-Boot" ]; then
-      print_message "Warning! Overwriting the bootloader is a dangerous procedure and may cause the device to malfunction.!" "$RED"
+      print_message "Warning! Flashing the bootloader is a dangerous procedure and may cause the device to malfunction.!" "$RED"
     fi
 
     echo ""
@@ -1604,14 +1605,14 @@ rewrite_block() {
         if uboot_write_aarch64 "$mtdFile"; then
           print_message "The section has been successfully overwritten" "$GREEN"
         else
-          print_message "Error during overwrite U-Boot" "$RED"
+          print_message "Error during overwriting U-Boot" "$RED"
           error_occurred=1
         fi
       else
         if perform_dd "$mtdFile" "/dev/mtdblock$part"; then
           print_message "The section has been successfully overwritten" "$GREEN"
         else
-          print_message "Error rewriting the section" "$RED"
+          print_message "Error rewriting the partition" "$RED"
           error_occurred=1
         fi
       fi
